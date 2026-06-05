@@ -65,6 +65,10 @@ struct ChatPanel: View {
             header
             Divider().opacity(0.4)
             messageList
+            if model.hasContext || model.isCapturing {
+                Divider().opacity(0.4)
+                contextBar
+            }
             Divider().opacity(0.4)
             inputBar
         }
@@ -148,8 +152,78 @@ struct ChatPanel: View {
         }
     }
 
+    // 取り込み中の文脈（テキスト/画像）＋クイック操作。
+    private var contextBar: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if model.isCapturing {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("画面の範囲を選択中…（Esc で中止）")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+            } else {
+                HStack(spacing: 6) {
+                    if let img = model.pendingImagePreview {
+                        Image(nsImage: img)
+                            .resizable().scaledToFill()
+                            .frame(width: 46, height: 32).clipped()
+                            .cornerRadius(5)
+                        Text("画面を取り込み中").font(.system(size: 11))
+                    } else if let t = model.pendingText {
+                        Image(systemName: "doc.on.clipboard").font(.system(size: 11))
+                        Text(t).lineLimit(1).truncationMode(.tail)
+                            .font(.system(size: 11)).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button { model.clearPending() } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+                // クイック操作
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(quickActions, id: \.0) { item in
+                            Button(item.0) { model.quickAction(item.1) }
+                                .buttonStyle(.bordered).controlSize(.small)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 6)
+    }
+
+    private var quickActions: [(String, String)] {
+        if model.pendingImage != nil {
+            return [
+                ("操作を教えて", "この画面でやりたいことの手順を、押すキーやボタンの位置まで具体的に教えて。"),
+                ("説明", "この画面に何が表示されているか説明して。"),
+                ("文字を読む", "画像内の文字をそのまま読み取って書き出して。"),
+            ]
+        } else {
+            return [
+                ("翻訳", "日本語に翻訳して。"),
+                ("英訳", "英語に翻訳して。"),
+                ("要約", "3行で要約して。"),
+                ("説明", "わかりやすく説明して。"),
+            ]
+        }
+    }
+
     private var inputBar: some View {
         HStack(spacing: 6) {
+            Button { model.attachClipboard() } label: {
+                Image(systemName: "doc.on.clipboard").foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("クリップボードを取り込む")
+            Button { model.captureScreenshot() } label: {
+                Image(systemName: "camera.viewfinder").foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("スクショで質問")
+
             TextField("質問を入力…", text: $model.draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
@@ -175,20 +249,38 @@ struct ChatPanel: View {
 /// 1 メッセージの吹き出し。
 struct MessageRow: View {
     let message: ChatMessage
+
+    private var thumbnail: NSImage? {
+        guard let b64 = message.image?.base64,
+              let data = Data(base64Encoded: b64),
+              let img = NSImage(data: data) else { return nil }
+        return img
+    }
+
     var body: some View {
         HStack {
             if message.role == .user { Spacer(minLength: 30) }
-            Text(message.text)
-                .font(.system(size: 12.5))
-                .textSelection(.enabled)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .background(
-                    message.role == .user
-                        ? AnyShapeStyle(Color.accentColor.opacity(0.9))
-                        : AnyShapeStyle(.quaternary),
-                    in: RoundedRectangle(cornerRadius: 12))
-                .foregroundStyle(message.role == .user ? Color.white : Color.primary)
+            VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 4) {
+                if let thumb = thumbnail {
+                    Image(nsImage: thumb)
+                        .resizable().scaledToFit()
+                        .frame(maxWidth: 180, maxHeight: 120)
+                        .cornerRadius(8)
+                        .overlay(RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(.white.opacity(0.25), lineWidth: 0.5))
+                }
+                Text(message.text)
+                    .font(.system(size: 12.5))
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(
+                        message.role == .user
+                            ? AnyShapeStyle(Color.accentColor.opacity(0.9))
+                            : AnyShapeStyle(.quaternary),
+                        in: RoundedRectangle(cornerRadius: 12))
+                    .foregroundStyle(message.role == .user ? Color.white : Color.primary)
+            }
             if message.role == .assistant { Spacer(minLength: 30) }
         }
     }

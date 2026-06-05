@@ -17,6 +17,15 @@ final class AppModel: ObservableObject {
     /// イルカの大きさ倍率（0.6〜2.2）。ピンチやメニューで変更。
     @Published var dolphinScale: Double = 1.0
 
+    /// 取り込み中の文脈（クリップボードのテキスト）。
+    @Published var pendingText: String?
+    /// 取り込み中の画像（スクショ等）。
+    @Published var pendingImage: ImageAttachment?
+    /// 取り込み画像のサムネ表示用。
+    @Published var pendingImagePreview: NSImage?
+    /// スクショ撮影中フラグ。
+    @Published var isCapturing = false
+
     /// 泳ぎ中か（ヒレを大きく振る）。
     @Published var isSwimming = false
     /// 左を向いているか（泳ぐ向きで反転）。
@@ -119,6 +128,83 @@ final class AppModel: ObservableObject {
     func clearChat() {
         messages = []
         bubble = nil
+    }
+
+    // MARK: - 文脈の取り込み（クリップボード／スクショ）
+
+    /// クリップボードを取り込む（テキスト優先、なければ画像）。
+    func attachClipboard() {
+        let pb = NSPasteboard.general
+        if let s = pb.string(forType: .string),
+           !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            pendingText = s
+            pendingImage = nil
+            pendingImagePreview = nil
+            bubble = nil
+        } else if let img = NSImage(pasteboard: pb), let b64 = Self.pngBase64(img) {
+            pendingImage = ImageAttachment(base64: b64, mediaType: "image/png")
+            pendingImagePreview = img
+            pendingText = nil
+        } else {
+            bubble = "クリップボードに取り込める内容がありません"
+        }
+    }
+
+    /// スクショ撮影を起動（範囲ドラッグ）。撮ったら画像として取り込む。
+    func captureScreenshot() {
+        guard !isCapturing else { return }
+        isCapturing = true
+        let path = NSTemporaryDirectory() + "kairu_capture.png"
+        // 自分のUIを写さないよう、撮影中はパネルを隠す。
+        window?.orderOut(nil)
+        DispatchQueue.global().async { [weak self] in
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+            p.arguments = ["-i", "-x", path]
+            try? p.run()
+            p.waitUntilExit()
+            let data = p.terminationStatus == 0
+                ? try? Data(contentsOf: URL(fileURLWithPath: path)) : nil
+            try? FileManager.default.removeItem(atPath: path)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.window?.orderFrontRegardless()
+                self.isCapturing = false
+                // キャンセル（Esc）時は data が nil。
+                guard let data, let img = NSImage(data: data) else { return }
+                self.pendingText = nil
+                self.pendingImage = ImageAttachment(base64: data.base64EncodedString(),
+                                                    mediaType: "image/png")
+                self.pendingImagePreview = img
+                self.isChatOpen = true
+                self.applyWindowSize(animated: true)
+                NSApp.activate(ignoringOtherApps: true)
+                self.window?.makeKeyAndOrderFront(nil)
+            }
+        }
+    }
+
+    /// 取り込み中の文脈を破棄。
+    func clearPending() {
+        pendingText = nil
+        pendingImage = nil
+        pendingImagePreview = nil
+    }
+
+    /// 取り込み中の文脈があるか。
+    var hasContext: Bool { pendingText != nil || pendingImage != nil }
+
+    /// クイック操作（プリセット指示を入れて送信）。
+    func quickAction(_ prompt: String) {
+        draft = prompt
+        send()
+    }
+
+    private static func pngBase64(_ image: NSImage) -> String? {
+        guard let tiff = image.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff),
+              let png = rep.representation(using: .png, properties: [:]) else { return nil }
+        return png.base64EncodedString()
     }
 
     // MARK: - いたずら（おせっかいモード）
@@ -233,19 +319,31 @@ final class AppModel: ObservableObject {
     // MARK: - メッセージ送信
 
     func send() {
-        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !isThinking else { return }
+        let typed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        // 取り込み中の文脈があれば、入力が空でも送れる（クイック操作用）。
+        guard (!typed.isEmpty || hasContext), !isThinking else { return }
         draft = ""
-        messages.append(ChatMessage(role: .user, text: text))
 
-        // ネットミーム: 「お前を消す方法」と尋ねられたら、自分自身を消す。
-        // API キー未設定でも動く（AI に送る前に処理）。
-        if SelfDestruct.isTriggered(by: text) {
+        // ネットミーム: 「お前を消す方法」（文脈の有無に関わらず生入力で判定）。
+        if SelfDestruct.isTriggered(by: typed) {
+            messages.append(ChatMessage(role: .user, text: typed))
             messages.append(ChatMessage(role: .assistant,
                 text: "「お前を消す方法」について調べました。\n……さようなら。"))
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { KairuQuit.now() }
             return
         }
+
+        // 取り込んだテキスト／画像を、ユーザーメッセージに合成する。
+        var text = typed
+        if let ctx = pendingText {
+            let q = typed.isEmpty ? "これについて教えて。" : typed
+            text = "次のテキストについて、\(q)\n\n\"\"\"\n\(ctx)\n\"\"\""
+        } else if pendingImage != nil, typed.isEmpty {
+            text = "この画面について、何ができるか・どう操作するか教えて。"
+        }
+        let image = pendingImage
+        messages.append(ChatMessage(role: .user, text: text, image: image))
+        clearPending()
 
         guard let config else {
             messages.append(ChatMessage(role: .assistant,
