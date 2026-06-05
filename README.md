@@ -10,7 +10,7 @@
 
 ![Swift](https://img.shields.io/badge/Swift-6.3-orange?logo=swift&logoColor=white)
 ![Platform](https://img.shields.io/badge/macOS-14%2B-black?logo=apple)
-![Tests](https://img.shields.io/badge/tests-24%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-34%20passing-brightgreen)
 ![Deletable](https://img.shields.io/badge/deletable-no-red)
 ![Annoyance](https://img.shields.io/badge/annoyance-MAXIMUM-ff69b4)
 ![License](https://img.shields.io/badge/license-MIT-blue)
@@ -20,6 +20,20 @@
 ---
 
 > **⚠️ 注意:** このアプリは終了しても **15分以内に勝手に戻ってきます**。これは仕様です。バグではありません。安心してください、設定でオフにできます（オフにすると少し寂しそうにします）。
+
+## 💗 裏モード
+
+チャットに「**裏モード**」と打つと、イルカが**カーソルが大好きな女の子**に変わります。100%あなたのカーソルに寄ってきて、**頭を撫でる**と甘えます（気づく → 甘える → 名残惜しむ、の状態遷移つき）。
+
+<div align="center">
+
+<video src="https://github.com/tatsunoritojo/MacKairu/raw/main/docs/videos/girl-petting.mp4" controls muted loop width="360"></video>
+
+▶ 再生されない場合は [こちら](docs/videos/girl-petting.mp4)
+
+</div>
+
+> キャラ画像は Gemini / ChatGPT で生成したものを差し替え可能（設定 →「裏キャラ」→「画像を取り込む」）。
 
 ## これは何
 
