@@ -38,8 +38,11 @@ public enum Character: String, CaseIterable, Identifiable, Sendable {
 /// 裏キャラ（女の子）の頭なで・移動・ドラッグ状態。各状態に対応する画像ファイル名を持つ。
 public enum GirlState: String, CaseIterable, Sendable {
     case idle        // ん…？（カーソルが近い時のきりっとした待機）
-    case rest        // ふぅ…（カーソルが遠い時の待機・開き目）
-    case doze        // すぅ…（カーソルが遠い時の待機・とろけ目／眠そう）
+    case rest        // ふぅ…（旧・遠い待機。現在は未使用、フォールバック用に保持）
+    case doze        // すぅ…（旧・遠い待機。現在は未使用）
+    case search      // どこ…？（カーソルが遠い時、キョロキョロ探す1）
+    case search2     // んー…？（キョロキョロ探す2）
+    case found       // いた！（移動直前の発見ポーズ）
     case run         // たっ（カーソルへ駆け出す・1枚目）
     case run2        // たたっ（カーソルへ駆け出す・2枚目／走りループ）
     case notice      // 待ってください、そっちですか？（気づき/反応開始）
@@ -69,6 +72,7 @@ public enum GirlState: String, CaseIterable, Sendable {
         case .teaching2: return 0.963
         case .dizzy2:    return 0.983  // dizzy と同じ見かけサイズに合わせる
         case .thinking2: return 1.015  // thinking と同じ見かけサイズに合わせる
+        case .search2:   return 1.028  // search と同じ見かけサイズに合わせる
         default:         return 1.0
         }
     }
@@ -99,6 +103,9 @@ public enum GirlState: String, CaseIterable, Sendable {
         case .teaching2:  return [.teaching2, .teaching, .notice, .idle]
         case .dizzy:      return [.dizzy, .idle]
         case .dizzy2:     return [.dizzy2, .dizzy, .idle]
+        case .search:     return [.search, .idle]
+        case .search2:    return [.search2, .search, .idle]
+        case .found:      return [.found, .notice, .idle]
         case .greet2:     return [.greet2, .greet, .idle]
         case .greet3:     return [.greet3, .greet, .idle]
         default:          return [self, .idle]
@@ -119,6 +126,9 @@ public enum GirlState: String, CaseIterable, Sendable {
         if n.contains("greeting2") || n.contains("greet2") { return .greet2 }
         if n.contains("greeting3") || n.contains("greet3") { return .greet3 }
         if n.contains("greet") || n.contains("hello") || n.contains("hi") { return .greet }
+        if n.contains("wondering2") || n.contains("search2") || n.contains("look2") { return .search2 }
+        if n.contains("wondering") || n.contains("search") || n.contains("look") { return .search }
+        if n.contains("got_it") || n.contains("gotit") || n.contains("found") { return .found }
         if n.contains("drag") { return .drag }
         if n.contains("hold") || n.contains("grab") || n.contains("lift") || n.contains("pick") { return .hold }
         if n.contains("run2") || n.contains("dash2") || n.contains("walk2") { return .run2 }

@@ -43,6 +43,7 @@ struct CharacterView: View {
             Group {
                 if character == .girl {
                     girlView(side: side, t: t)
+                        .scaleEffect(x: flip ? -1 : 1, y: 1)
                 } else {
                     Canvas { ctx, size in
                         switch character {

@@ -107,19 +107,19 @@ final class PettingMachineTests: XCTestCase {
         XCTAssertEqual(m.display, .idle)
     }
 
-    // MARK: - 遠い待機（rest / doze）
+    // MARK: - 遠い待機（search / search2 でキョロキョロ探す）
 
-    func testFarCursorShowsRestThenDoze() {
+    func testFarCursorShowsSearchCycle() {
         var m = PettingMachine()
         let far = PettingMachine.Input(dt: 0.1, inZone: false, speed: 0, xWobble: 0,
                                        distance: 1000, enabled: true)
         m.update(far)
         XCTAssertEqual(m.state, .idle)      // 論理状態は待機のまま
-        XCTAssertEqual(m.display, .rest)    // 表示は開き目
-        // restOpenDuration=2.4 を超えると とろけ目(doze)へ。
-        for _ in 0..<25 { m.update(far) }
+        XCTAssertEqual(m.display, .search)  // 表示はキョロキョロ1
+        // restOpenDuration=1.1 を超えると search2 へ。
+        for _ in 0..<13 { m.update(far) }
         XCTAssertEqual(m.state, .idle)
-        XCTAssertEqual(m.display, .doze)
+        XCTAssertEqual(m.display, .search2)
     }
 
     func testNearCursorShowsAlertIdle() {

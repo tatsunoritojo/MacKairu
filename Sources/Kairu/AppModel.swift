@@ -35,8 +35,15 @@ final class AppModel: ObservableObject {
 
     /// 泳ぎ中か（ヒレを大きく振る）。
     @Published var isSwimming = false
-    /// 左を向いているか（泳ぐ向きで反転）。
+    /// 左を向いているか（泳ぐ向きで反転）。通常キャラの泳ぎ向き用。
     @Published var facingLeft = false
+    /// 裏キャラ画像の左右反転（発見ポーズでカーソル方向を向く用）。
+    @Published var girlFlip = false
+
+    /// 発見モーションの残り時間と、その後カーソルへ走るための保留。
+    private var discoverTimer: Double = 0
+    private var pendingApproach = false
+    private var approachFlip = false
 
     private var swimTimer: Timer?
     private var chatterTimer: Timer?
@@ -340,6 +347,7 @@ final class AppModel: ObservableObject {
                 isHeld = true
                 heldStart = ProcessInfo.processInfo.systemUptime
                 didDrag = false
+                discoverTimer = 0; pendingApproach = false // 掴んだら発見シーケンスは中断
                 whirlScore = 0
                 lastWhirlPos = NSEvent.mouseLocation
                 lastWhirlAngle = nil
@@ -462,7 +470,19 @@ final class AppModel: ObservableObject {
             whirlScore = max(0, whirlScore - dt * whirlDecayPerSec)
         }
 
-        if dizzyTimer > 0, !isHeld {
+        girlFlip = false // 既定は反転なし（発見ポーズの時だけ向きを変える）
+
+        if discoverTimer > 0, !isHeld, !isChatOpen {
+            // 移動直前の発見ポーズ。カーソル方向を向き、知覚できる間を置いてから走り出す。
+            discoverTimer -= dt
+            girlDisplay = .found
+            girlFlip = approachFlip
+            isBeingPatted = false
+            if discoverTimer <= 0, pendingApproach {
+                pendingApproach = false
+                performSwim(goToCursor: true)
+            }
+        } else if dizzyTimer > 0, !isHeld {
             // 手を離したあと、ふらふら目を回す（掴み直したら中断）。
             dizzyTimer -= dt
             dizzyPhase += dt
@@ -502,6 +522,8 @@ final class AppModel: ObservableObject {
             teachingTimer = Double.random(in: 1.8...3.6)
             thinkingAlt = false
             thinkingTimer = 0
+            // 発見シーケンスが中断された場合は破棄。
+            if discoverTimer > 0 { discoverTimer = 0; pendingApproach = false }
         }
     }
 
@@ -647,18 +669,29 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// すーっと泳いで移動する。約20%の確率でマウスカーソルの位置へ寄ってくる。
+    /// 移動のトリガ。裏モードはまず「発見ポーズ」を挟んでから走る。通常キャラは即移動。
     private func swim() {
-        guard isAnnoyEnabled, !isChatOpen, !isThinking,
-              let window, let screen = window.screen ?? NSScreen.main else { return }
-        // 裏モードで撫でられ中・終了演出中は動かない。
-        if character == .girl && (girlState != .idle || girlDying) { return }
+        guard isAnnoyEnabled, !isChatOpen, !isThinking, let window else { return }
+        if isSwimming || discoverTimer > 0 { return }
+        if character == .girl {
+            if girlState != .idle || girlDying { return }
+            // カーソルを見つける発見モーションを挟む。マウスが自分より右なら反転して向く。
+            approachFlip = NSEvent.mouseLocation.x > window.frame.midX
+            discoverTimer = Double.random(in: 0.6...1.0) // 知覚できる発見の間
+            pendingApproach = true
+            return
+        }
+        performSwim(goToCursor: Double.random(in: 0 ..< 1) < 0.2)
+    }
+
+    /// 実際に泳いで移動する。裏モードは常にカーソルへ、通常は引数で制御。
+    private func performSwim(goToCursor: Bool) {
+        guard let window, let screen = window.screen ?? NSScreen.main else { return }
+        if character == .girl && girlDying { return }
         let size = window.frame.size
         let from = window.frame.origin
         let margin = dolphinSide * 0.5
 
-        // 裏モードは100%カーソルへ。通常は20%。
-        let goToCursor = character == .girl ? true : (Double.random(in: 0 ..< 1) < 0.2)
         let targetScreen: NSScreen
         var cx: CGFloat
         var cy: CGFloat
