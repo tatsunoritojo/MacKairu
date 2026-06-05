@@ -36,6 +36,7 @@ struct SettingsView: View {
                 promptSection
                 resurrectSection
                 annoySection
+                characterSection
                 Divider()
                 footer
             }
@@ -153,6 +154,31 @@ struct SettingsView: View {
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var characterSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("キャラクター").font(.system(size: 12, weight: .semibold))
+            Picker("", selection: Binding(
+                get: { model.character == .girl ? Character.dolphin : model.character },
+                set: { model.setCharacter($0) })) {
+                ForEach(Character.selectable) { c in
+                    Text("\(c.emoji) \(c.label)").tag(c)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+
+            if model.character == .girl {
+                HStack(spacing: 8) {
+                    Text("裏キャラ 💗（チャットに「裏モード」で切替）")
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("画像を選ぶ") { model.chooseGirlImage() }.font(.system(size: 11))
+                    Button("AIで生成") { model.generateGirlImage() }.font(.system(size: 11))
+                }
+            }
         }
     }
 

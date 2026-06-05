@@ -17,8 +17,10 @@ struct RootView: View {
                     .transition(.opacity)
             }
 
-            DolphinView(thinking: model.isThinking, scale: model.dolphinScale, fat: model.fatness,
-                        swimming: model.isSwimming, flip: model.facingLeft)
+            CharacterView(character: model.character, thinking: model.isThinking,
+                          scale: model.dolphinScale, fat: model.fatness,
+                          swimming: model.isSwimming, flip: model.facingLeft,
+                          girlImage: model.girlImage, patted: model.isBeingPatted)
                 .contentShape(Rectangle())
                 .onTapGesture {
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
@@ -81,7 +83,7 @@ struct ChatPanel: View {
 
     private var header: some View {
         HStack(spacing: 6) {
-            Text("🐬 MacKairu").font(.system(size: 13, weight: .semibold))
+            Text("\(model.character.emoji) MacKairu").font(.system(size: 13, weight: .semibold))
             Spacer()
             // 履歴クリア（クリアするとイルカがスリムに戻る）
             Button {
