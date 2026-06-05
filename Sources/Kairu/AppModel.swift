@@ -58,6 +58,8 @@ final class AppModel: ObservableObject {
     /// 裏キャラ（女の子）の論理状態と表示状態。
     @Published var girlState: GirlState = .idle
     @Published var girlDisplay: GirlState = .idle
+    /// 「お前を消す方法」で消される最中（悲しくフェードアウト中）。
+    @Published var girlDying = false
     private var girlImages: [GirlState: NSImage] = [:]
     /// 表示すべき裏キャラ画像。
     var girlCurrentImage: NSImage? { girlImages[girlDisplay] ?? girlImages[.idle] }
@@ -103,8 +105,15 @@ final class AppModel: ObservableObject {
 
     private func loadGirlImages() {
         for s in GirlState.allCases {
-            let url = Self.girlDir.appendingPathComponent(s.fileName)
-            if let img = NSImage(contentsOf: url) { girlImages[s] = img }
+            // 1) ユーザーが取り込んだ上書き（config）→ 2) プロジェクト同梱（バンドル）。
+            let override = Self.girlDir.appendingPathComponent(s.fileName)
+            if let img = NSImage(contentsOf: override) {
+                girlImages[s] = img
+            } else if let url = Bundle.main.resourceURL?
+                .appendingPathComponent("girl/\(s.fileName)"),
+                let img = NSImage(contentsOf: url) {
+                girlImages[s] = img
+            }
         }
     }
 
@@ -275,6 +284,7 @@ final class AppModel: ObservableObject {
 
     /// 撫で状態の更新（仕様の状態機械）。
     private func tickGirl() {
+        if girlDying { return } // 終了演出中は何もしない
         let now = ProcessInfo.processInfo.systemUptime
         let dt = lastTick == 0 ? 0.05 : now - lastTick
         lastTick = now
@@ -334,6 +344,8 @@ final class AppModel: ObservableObject {
             }
         case .end:
             if now > endUntil { setGirlState(.idle) }
+        case .sad:
+            break // 演出専用。状態機械では遷移しない
         }
         isBeingPatted = (girlState == .pamper || girlState == .pamperLoop)
     }
@@ -478,8 +490,8 @@ final class AppModel: ObservableObject {
     private func swim() {
         guard isAnnoyEnabled, !isChatOpen, !isThinking,
               let window, let screen = window.screen ?? NSScreen.main else { return }
-        // 裏モードで撫でられ中は動かない（落ち着いて甘えさせる）。
-        if character == .girl && girlState != .idle { return }
+        // 裏モードで撫でられ中・終了演出中は動かない。
+        if character == .girl && (girlState != .idle || girlDying) { return }
         let size = window.frame.size
         let from = window.frame.origin
         let margin = dolphinSide * 0.5
@@ -562,9 +574,20 @@ final class AppModel: ObservableObject {
         // ネットミーム: 「お前を消す方法」（文脈の有無に関わらず生入力で判定）。
         if SelfDestruct.isTriggered(by: typed) {
             messages.append(ChatMessage(role: .user, text: typed))
-            messages.append(ChatMessage(role: .assistant,
-                text: "「お前を消す方法」について調べました。\n……さようなら。"))
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { KairuQuit.now() }
+            if character == .girl, girlImages[.sad] != nil {
+                // 裏モード: 悲しい顔でブルブル震えながら 5 秒かけてフェードアウト。
+                messages.append(ChatMessage(role: .assistant,
+                    text: "え…わたしを、消すんですか…？\n……ばいばい。"))
+                stopPatTracking()
+                girlDisplay = .sad
+                girlDying = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { KairuQuit.now() }
+            } else {
+                messages.append(ChatMessage(role: .assistant,
+                    text: "「お前を消す方法」について調べました。\n……さようなら。"))
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { KairuQuit.now() }
+            }
+            clearPending()
             return
         }
 

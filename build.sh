@@ -17,6 +17,9 @@ rm -rf "$BUNDLE"
 mkdir -p "$BIN_DIR" "$RES_DIR"
 cp "$BIN_PATH" "$BIN_DIR/$APP"
 
+# 画像アセット（裏キャラ等）をバンドルへ。
+if [ -d Resources ]; then cp -R Resources/. "$RES_DIR/"; fi
+
 cat > "$BUNDLE/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

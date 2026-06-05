@@ -42,13 +42,15 @@ public enum GirlState: String, CaseIterable, Sendable {
     case pamper      // えへへ（甘え始め）
     case pamperLoop  // えへ（甘え継続ループ）
     case end         // …もう終わり？（余韻）
+    case sad         // 「お前を消す方法」で終了される時の悲しい顔（演出専用）
 
-    /// 画像ファイル名（~/.config/mac-concierge/characters/girl/<name>.png）。
+    /// 画像ファイル名（girl/<name>.png）。
     public var fileName: String { rawValue + ".png" }
 
-    /// 取り込んだファイル名から状態を推定（noticed/waiting/pampering/pampering2/afterglowing 等）。
+    /// 取り込んだファイル名から状態を推定（noticed/waiting/pampering/pampering2/afterglowing/sad 等）。
     public static func from(fileName name: String) -> GirlState? {
         let n = name.lowercased()
+        if n.contains("sad") { return .sad }
         if n.contains("afterglow") || n == "end" { return .end }
         if n.contains("pampering2") || n.contains("pamperloop") { return .pamperLoop }
         if n.contains("pamper") { return .pamper }
