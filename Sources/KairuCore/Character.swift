@@ -47,10 +47,15 @@ public enum GirlState: String, CaseIterable, Sendable {
     case pamperLoop  // えへ（甘え継続ループ）
     case hold        // わっ（掴まれて持ち上げられた・驚き）
     case drag        // えへへ（掴まれたまま運ばれている・うれしい）
+    case thinking    // うーん…（AIが返答を考えている間）
+    case thinking2   // むむ…（思考中の差分）
     case teaching    // ここがポイント！（チャットで解説している時）
     case teaching2   // ね？（解説中の表情差分・ウインク）
     case dizzy       // ぐるぐる…（振り回されて目を回している）
     case dizzy2      // ふらふら…（目回しの差分）
+    case greet       // やっほー！（初回起動の挨拶1）
+    case greet2      // こんにちはー！（初回起動の挨拶2）
+    case greet3      // よろしくねー！（初回起動の挨拶3）
     case end         // …もう終わり？（余韻）
     case sad         // 「お前を消す方法」で終了される時の悲しい顔（演出専用）
 
@@ -63,6 +68,7 @@ public enum GirlState: String, CaseIterable, Sendable {
         switch self {
         case .teaching2: return 0.963
         case .dizzy2:    return 0.983  // dizzy と同じ見かけサイズに合わせる
+        case .thinking2: return 1.015  // thinking と同じ見かけサイズに合わせる
         default:         return 1.0
         }
     }
@@ -87,10 +93,14 @@ public enum GirlState: String, CaseIterable, Sendable {
         case .pamperLoop: return [.pamperLoop, .pamper, .idle]
         case .drag:       return [.drag, .hold, .pamper, .idle]
         case .hold:       return [.hold, .notice, .idle]
+        case .thinking:   return [.thinking, .teaching, .notice, .idle]
+        case .thinking2:  return [.thinking2, .thinking, .teaching, .idle]
         case .teaching:   return [.teaching, .notice, .idle]
         case .teaching2:  return [.teaching2, .teaching, .notice, .idle]
         case .dizzy:      return [.dizzy, .idle]
         case .dizzy2:     return [.dizzy2, .dizzy, .idle]
+        case .greet2:     return [.greet2, .greet, .idle]
+        case .greet3:     return [.greet3, .greet, .idle]
         default:          return [self, .idle]
         }
     }
@@ -104,6 +114,11 @@ public enum GirlState: String, CaseIterable, Sendable {
         if n.contains("teach") || n.contains("tip") || n.contains("explain") { return .teaching }
         if n.contains("confused2") || n.contains("dizzy2") { return .dizzy2 }
         if n.contains("confus") || n.contains("dizzy") { return .dizzy }
+        if n.contains("thinking2") || n.contains("thiking2") || n.contains("think2") { return .thinking2 }
+        if n.contains("thinking") || n.contains("thiking") || n.contains("think") { return .thinking }
+        if n.contains("greeting2") || n.contains("greet2") { return .greet2 }
+        if n.contains("greeting3") || n.contains("greet3") { return .greet3 }
+        if n.contains("greet") || n.contains("hello") || n.contains("hi") { return .greet }
         if n.contains("drag") { return .drag }
         if n.contains("hold") || n.contains("grab") || n.contains("lift") || n.contains("pick") { return .hold }
         if n.contains("run2") || n.contains("dash2") || n.contains("walk2") { return .run2 }
