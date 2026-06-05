@@ -30,7 +30,7 @@ public enum Character: String, CaseIterable, Identifiable, Sendable {
         case .cat: return "🐱"
         case .penguin: return "🐧"
         case .chick: return "🐤"
-        case .girl: return "💗"
+        case .girl: return "✨"
         }
     }
 }
