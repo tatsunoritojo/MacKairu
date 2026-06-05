@@ -244,7 +244,7 @@ final class AppModel: ObservableObject {
             startPatTracking()
             maybeGreet() // 初めて POIN が現れた時だけ挨拶
             bubble = hasGirlImages
-                ? "…裏モード。頭、撫でてくれてもいいんだよ？"
+                ? "…ぼくのこと、呼んだ？頭、撫でてくれてもいいんだよ？"
                 : "裏キャラの画像がまだないよ。設定 →「裏キャラ」で取り込んでね。"
         } else {
             stopPatTracking()
@@ -258,8 +258,8 @@ final class AppModel: ObservableObject {
         let goingSecret = character != .girl
         setCharacter(goingSecret ? .girl : .dolphin)
         messages.append(ChatMessage(role: .assistant,
-            text: goingSecret ? "…裏モード。頭、撫でてくれてもいいんだよ？"
-                              : "通常モードに戻すね。"))
+            text: goingSecret ? "…ぼくのこと、呼んだ？頭、撫でてくれてもいいんだよ？"
+                              : "またね。呼んだら来るね。"))
     }
 
     /// 裏キャラの画像（最大12枚: 待機/遠待機2/駆け出し2/気づき/甘え2/掴み/ドラッグ/余韻/悲しみ）を取り込む。

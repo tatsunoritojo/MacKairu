@@ -143,13 +143,17 @@ public enum GirlState: String, CaseIterable, Sendable {
     }
 }
 
-/// 裏モードの呪文判定（チャットに打つと切り替わる）。
+/// POIN 呼び出しの呪文判定（チャットに打つと切り替わる）。
+/// 「POIN」で召喚。旧「裏モード」も後方互換で残す。
 public enum SecretMode {
     public static func isTriggered(by text: String) -> Bool {
         let t = text.replacingOccurrences(of: " ", with: "")
             .replacingOccurrences(of: "　", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let spells = ["裏モード", "うらもーど", "裏もーど"]
-        return spells.contains { t.contains($0) }
+            .lowercased()
+        // 短い英単語の誤爆（point 等）を避けるため、英字呪文は完全一致で判定。
+        let exact = ["poin", "ぽいん", "ポイン"]
+        let legacy = ["裏モード", "うらもーど", "裏もーど"]
+        return exact.contains(t) || legacy.contains { t.contains($0) }
     }
 }

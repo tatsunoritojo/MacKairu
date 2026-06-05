@@ -72,9 +72,17 @@ final class CharacterTests: XCTestCase {
     }
 
     func testSecretMode() {
+        // POIN 呼び（大文字小文字・かな問わず）
+        XCTAssertTrue(SecretMode.isTriggered(by: "POIN"))
+        XCTAssertTrue(SecretMode.isTriggered(by: "poin"))
+        XCTAssertTrue(SecretMode.isTriggered(by: " ポイン "))
+        XCTAssertTrue(SecretMode.isTriggered(by: "ぽいん"))
+        // 旧「裏モード」も後方互換で有効
         XCTAssertTrue(SecretMode.isTriggered(by: "裏モード"))
         XCTAssertTrue(SecretMode.isTriggered(by: "  裏 モード "))
         XCTAssertTrue(SecretMode.isTriggered(by: "うらもーど"))
+        // 誤爆しない
+        XCTAssertFalse(SecretMode.isTriggered(by: "point"))   // poin を含むが別語
         XCTAssertFalse(SecretMode.isTriggered(by: "表モード"))
         XCTAssertFalse(SecretMode.isTriggered(by: "こんにちは"))
     }
