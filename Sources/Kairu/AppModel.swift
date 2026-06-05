@@ -235,6 +235,7 @@ final class AppModel: ObservableObject {
         if c == .girl {
             resetGirlState()
             startPatTracking()
+            maybeGreet() // 初めて POIN が現れた時だけ挨拶
             bubble = hasGirlImages
                 ? "…裏モード。頭、撫でてくれてもいいんだよ？"
                 : "裏キャラの画像がまだないよ。設定 →「裏キャラ」で取り込んでね。"
@@ -468,9 +469,24 @@ final class AppModel: ObservableObject {
             girlDisplay = dizzyPhase.truncatingRemainder(dividingBy: dizzyFlip * 2) < dizzyFlip
                 ? .dizzy : .dizzy2
             isBeingPatted = false
-        } else if isExplaining, girlState != .hold, girlState != .drag {
-            // チャットで解説している間（思考中・回答提示中）は解説ポーズを表示。
-            // 基本は目を開いた解説顔、ときどきウインク（話してる感）。
+        } else if greetTimer > 0, !isHeld {
+            // 初回起動の挨拶。3枚を順番に見せる（掴んだら中断）。
+            greetTimer -= dt
+            let idx = Int((greetDuration - greetTimer) / 1.4) % 3
+            girlDisplay = idx == 0 ? .greet : (idx == 1 ? .greet2 : .greet3)
+            isBeingPatted = false
+        } else if isThinking, !isHeld {
+            // AIが返答を考えている間（うーん…／むむ…をゆっくり往復）。
+            thinkingTimer -= dt
+            if thinkingTimer <= 0 {
+                thinkingAlt.toggle()
+                thinkingTimer = Double.random(in: 0.9...1.5)
+            }
+            girlDisplay = thinkingAlt ? .thinking2 : .thinking
+            isBeingPatted = false
+        } else if isChatOpen, messages.last?.role == .assistant,
+                  girlState != .hold, girlState != .drag {
+            // 回答を提示している間は解説ポーズ。ときどきウインク（話してる感）。
             // 開いている時間は 1.8〜3.6 秒のランダムで、機械的な周期感を消す。
             teachingTimer -= dt
             if teachingTimer <= 0 {
@@ -484,18 +500,28 @@ final class AppModel: ObservableObject {
         } else {
             teachingWinking = false
             teachingTimer = Double.random(in: 1.8...3.6)
+            thinkingAlt = false
+            thinkingTimer = 0
         }
     }
 
     private var teachingWinking = false
     private var teachingTimer: Double = 0
     private let teachingWinkDuration: Double = 0.32
+    private var thinkingAlt = false
+    private var thinkingTimer: Double = 0
+    /// 初回挨拶の残り時間（秒）。
+    private var greetTimer: Double = 0
+    private let greetDuration: Double = 4.6
+    /// 初回挨拶を一度だけ出すためのフラグキー。
+    private let greetedKey = "girlGreetedV1"
 
-    /// チャットで解説している最中か（思考中、または回答を提示中）。
-    private var isExplaining: Bool {
-        guard character == .girl else { return false }
-        if isThinking { return true }
-        return isChatOpen && messages.last?.role == .assistant
+    /// 初回だけ挨拶シーケンスを開始する（裏キャラが初めて現れた時）。
+    private func maybeGreet() {
+        guard character == .girl, hasGirlImages else { return }
+        guard !UserDefaults.standard.bool(forKey: greetedKey) else { return }
+        UserDefaults.standard.set(true, forKey: greetedKey)
+        greetTimer = greetDuration
     }
 
     // MARK: - 文脈の取り込み（クリップボード／スクショ）
@@ -610,7 +636,7 @@ final class AppModel: ObservableObject {
     func startMischief() {
         scheduleSwim()
         scheduleChatter()
-        if character == .girl { startPatTracking() }
+        if character == .girl { startPatTracking(); maybeGreet() }
     }
 
     private func scheduleSwim() {
@@ -712,7 +738,7 @@ final class AppModel: ObservableObject {
             if character == .girl, girlImages[.sad] != nil {
                 // 裏モード: 悲しい顔でブルブル震えながら 5 秒かけてフェードアウト。
                 messages.append(ChatMessage(role: .assistant,
-                    text: "え…わたしを、消すんですか…？\n……ばいばい。"))
+                    text: "え…ぼくを、消すんですか…？\n……ばいばい。"))
                 stopPatTracking()
                 pettingMachine.enterSad()
                 girlDisplay = .sad
@@ -753,7 +779,10 @@ final class AppModel: ObservableObject {
             return
         }
         isThinking = true
-        let client = AIClient(config: config)
+        // 裏モード（POIN）のときは少女の人格プロンプトに差し替える。
+        var requestConfig = config
+        if character == .girl { requestConfig.systemPrompt = AppConfig.girlSystemPrompt }
+        let client = AIClient(config: requestConfig)
         let history = messages
         Task {
             do {
