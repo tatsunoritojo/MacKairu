@@ -186,6 +186,18 @@ struct SettingsView: View {
                     .onChange(of: nade) { _, on in
                         UserDefaults.standard.set(on, forKey: "nadeReaction")
                     }
+                    Text("これまで \(model.poinRecoverCount) 回 泣き止ませた")
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                }
+            }
+            // POIN がロックされている時だけ、呼び戻すための導線を出す。
+            if model.poinLocked {
+                HStack(spacing: 8) {
+                    Text("POIN は拗ねて出てこない（イルカたちは使えます）")
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("呼び戻す") { model.unlockPoin() }
+                        .font(.system(size: 11))
                 }
             }
         }

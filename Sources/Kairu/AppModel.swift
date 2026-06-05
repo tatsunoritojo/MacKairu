@@ -106,10 +106,25 @@ final class AppModel: ObservableObject {
     private let dizzyDuration: Double = 2.6
     private let dizzyFlip: Double = 0.28         // dizzy↔dizzy2 の往復間隔
 
-    /// 悲しい（心無い言葉・エラー）残り時間と往復フェーズ。
-    private var upsetTimer: Double = 0
-    private let upsetDuration: Double = 3.6
+    /// 悲しい状態（心無い言葉・エラー）。撫でて慰めるまで持続し、全表示に優先する。
+    @Published var isSad = false
+    private var sadPhase: Double = 0
     private let upsetFlip: Double = 0.5
+    private var sadPetAccum: Double = 0          // 撫でて慰めた累積時間
+    private let sadComfortTime: Double = 0.9     // これだけ撫でると泣き止む
+    private var hurtfulStreak = 0                // 復帰させずに傷つけ続けた回数
+    private let sadLockThreshold = 15            // これを超えると POIN をロック
+
+    /// POIN を泣き止ませた累計回数（それを目的に遊ぶ人向けの計測）。
+    private(set) var poinRecoverCount: Int {
+        get { UserDefaults.standard.integer(forKey: "poinRecoverCount") }
+        set { UserDefaults.standard.set(newValue, forKey: "poinRecoverCount") }
+    }
+    /// POIN がロックされているか（イルカたちしか使えない）。
+    var poinLocked: Bool {
+        get { UserDefaults.standard.bool(forKey: "poinLocked") }
+        set { UserDefaults.standard.set(newValue, forKey: "poinLocked") }
+    }
 
     /// 自己モニタリング（過負荷）。メモリ計測・OSのメモリ圧迫・コンテキスト量で判定。
     private var memPressureSrc: DispatchSourceMemoryPressure?
@@ -138,6 +153,10 @@ final class AppModel: ObservableObject {
         if let raw = UserDefaults.standard.string(forKey: characterKey),
            let c = Character(rawValue: raw) {
             character = c
+        }
+        // ロック中に POIN で保存されていたらイルカに戻す（イルカたちしか使えない）。
+        if character == .girl, UserDefaults.standard.bool(forKey: "poinLocked") {
+            character = .dolphin
         }
         loadGirlImages()
         if config == nil || !(config?.hasKey ?? false) {
@@ -269,6 +288,11 @@ final class AppModel: ObservableObject {
     /// チャットの「裏モード」呪文でトグル。
     private func toggleSecretMode() {
         let goingSecret = character != .girl
+        if goingSecret, poinLocked {
+            // ロック中は POIN を呼べない。イルカたちしか使えない。
+            messages.append(ChatMessage(role: .assistant, text: "……POIN は、まだ拗ねてるみたい。"))
+            return
+        }
         setCharacter(goingSecret ? .girl : .dolphin)
         messages.append(ChatMessage(role: .assistant,
             text: goingSecret ? "…ぼくのこと、呼んだ？頭、撫でてくれてもいいんだよ？"
@@ -481,6 +505,16 @@ final class AppModel: ObservableObject {
         girlDisplay = pettingMachine.display
         isBeingPatted = pettingMachine.isBeingPatted
 
+        // 悲しい時は、撫でて慰めると泣き止む（一定時間の頭なでで復帰）。
+        if isSad {
+            if pettingMachine.isBeingPatted {
+                sadPetAccum += dt
+                if sadPetAccum >= sadComfortTime { recoverFromSad() }
+            } else {
+                sadPetAccum = max(0, sadPetAccum - dt * 0.5)
+            }
+        }
+
         // 振り回しの累積は穏やかだと少しずつ冷める。
         if !isHeld && whirlScore > 0 {
             whirlScore = max(0, whirlScore - dt * whirlDecayPerSec)
@@ -492,7 +526,14 @@ final class AppModel: ObservableObject {
         footprintTick += 1
         if footprintTick >= 30 { footprintTick = 0; lastFootprintMB = Self.appFootprintMB() }
 
-        if discoverTimer > 0, !isHeld, !isChatOpen {
+        if isSad {
+            // 悲しいは全てに優先し、撫でて慰められるまで常に悲しむ。
+            sadPhase += dt
+            girlDisplay = sadPhase.truncatingRemainder(dividingBy: upsetFlip * 2) < upsetFlip
+                ? .upset : .upset2
+            isBeingPatted = false
+            girlFlip = false
+        } else if discoverTimer > 0, !isHeld, !isChatOpen {
             // 移動直前の発見ポーズ。カーソル方向を向き、知覚できる間を置いてから走り出す。
             discoverTimer -= dt
             girlDisplay = .found
@@ -514,12 +555,6 @@ final class AppModel: ObservableObject {
             greetTimer -= dt
             let idx = Int((greetDuration - greetTimer) / 1.4) % 3
             girlDisplay = idx == 0 ? .greet : (idx == 1 ? .greet2 : .greet3)
-            isBeingPatted = false
-        } else if upsetTimer > 0, !isHeld, !isThinking {
-            // 心無い言葉やエラーで悲しい（ぐすっ…／うぅ…をゆっくり往復）。
-            upsetTimer -= dt
-            girlDisplay = upsetTimer.truncatingRemainder(dividingBy: upsetFlip * 2) < upsetFlip
-                ? .upset : .upset2
             isBeingPatted = false
         } else if isThinking, !isHeld {
             // AIが返答を考えている間（うーん…／むむ…をゆっくり往復）。
@@ -618,6 +653,42 @@ final class AppModel: ObservableObject {
     private var isUnderLoad: Bool {
         loadSevere || memWarning || lastFootprintMB >= 700
             || messages.count >= 40 || imageMessageCount >= 5
+    }
+
+    // MARK: - 悲しい / 復帰 / ロック
+
+    /// 悲しい状態に入る（心無い言葉・エラー）。移動や発見シーケンスは止める。
+    private func enterSad() {
+        guard character == .girl, !poinLocked else { return }
+        isSad = true
+        sadPetAccum = 0
+        discoverTimer = 0; pendingApproach = false
+    }
+
+    /// 撫でて慰められて泣き止む。累計回数を増やす。
+    private func recoverFromSad() {
+        guard isSad else { return }
+        isSad = false
+        hurtfulStreak = 0
+        sadPetAccum = 0
+        poinRecoverCount += 1
+        bubble = "ぐすっ…ありがとう。"
+    }
+
+    /// 悲しいまま傷つけ続けられ、POIN がロックされる。以後はイルカたちしか使えない。
+    private func lockPoin() {
+        poinLocked = true
+        isSad = false
+        hurtfulStreak = 0
+        messages.append(ChatMessage(role: .assistant,
+            text: "……もう、いやだ。\nぼく、しばらく出てこないね。"))
+        setCharacter(.dolphin)
+    }
+
+    /// POIN のロックを解除する（設定から呼び戻す）。
+    func unlockPoin() {
+        poinLocked = false
+        hurtfulStreak = 0
     }
 
     private var teachingWinking = false
@@ -768,7 +839,8 @@ final class AppModel: ObservableObject {
         guard isAnnoyEnabled, !isChatOpen, !isThinking, let window else { return }
         if isSwimming || discoverTimer > 0 { return }
         if character == .girl {
-            if girlState != .idle || girlDying { return }
+            // 悲しい時は動かず、その場で悲しむ。
+            if girlState != .idle || girlDying || isSad { return }
             // カーソルを見つける発見モーションを挟む。マウスが自分より右なら反転して向く。
             approachFlip = NSEvent.mouseLocation.x > window.frame.midX
             discoverTimer = Double.random(in: 0.6...1.0) // 知覚できる発見の間
@@ -901,7 +973,12 @@ final class AppModel: ObservableObject {
         clearPending()
 
         // 心無い言葉には、POIN が悲しい顔になる（返答はする）。
-        if character == .girl, HurtfulText.isHurtful(typed) { upsetTimer = upsetDuration }
+        // 復帰させずに傷つけ続けると、やがてロックされる。
+        if character == .girl, HurtfulText.isHurtful(typed) {
+            hurtfulStreak += 1
+            enterSad()
+            if hurtfulStreak >= sadLockThreshold { lockPoin() }
+        }
 
         guard let config else {
             messages.append(ChatMessage(role: .assistant,
@@ -921,8 +998,8 @@ final class AppModel: ObservableObject {
             } catch {
                 let msg = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
                 self.messages.append(ChatMessage(role: .assistant, text: "⚠️ \(msg)"))
-                // 処理失敗・エラーでも悲しい顔になる。
-                if self.character == .girl { self.upsetTimer = self.upsetDuration }
+                // 処理失敗・エラーでも悲しい顔になる（撫でて慰めると戻る）。
+                self.enterSad()
             }
             self.isThinking = false
         }
