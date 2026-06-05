@@ -48,11 +48,34 @@ public enum GirlState: String, CaseIterable, Sendable {
     case hold        // わっ（掴まれて持ち上げられた・驚き）
     case drag        // えへへ（掴まれたまま運ばれている・うれしい）
     case teaching    // ここがポイント！（チャットで解説している時）
+    case teaching2   // ね？（解説中の表情差分・ウインク）
+    case dizzy       // ぐるぐる…（振り回されて目を回している）
+    case dizzy2      // ふらふら…（目回しの差分）
     case end         // …もう終わり？（余韻）
     case sad         // 「お前を消す方法」で終了される時の悲しい顔（演出専用）
 
     /// 画像ファイル名（girl/<name>.png）。
     public var fileName: String { rawValue + ".png" }
+
+    /// 絵ごとのキャラ描画サイズ差を吸収する表示倍率。
+    /// teaching2 は素材内でキャラが約3.7%大きく描かれているため、teaching と同じ見かけに合わせる。
+    public var displayScale: Double {
+        switch self {
+        case .teaching2: return 0.963
+        case .dizzy2:    return 0.983  // dizzy と同じ見かけサイズに合わせる
+        default:         return 1.0
+        }
+    }
+
+    /// 画像内に描かれたカーソル先端の位置（画像座標・左上原点の正規化 0〜1）。
+    /// 掴み/ドラッグ時に、現実のマウスをこの位置へ重ねるためのアンカー。無い状態は nil。
+    public var cursorAnchor: (x: Double, y: Double)? {
+        switch self {
+        case .drag: return (0.52, 0.05)
+        case .hold: return (0.61, 0.05)
+        default:    return nil
+        }
+    }
 
     /// 表示用フォールバック連鎖。新規画像が未配置でも近い既存画像で代替し、欠けは idle で埋める。
     public var imageChain: [GirlState] {
@@ -65,6 +88,9 @@ public enum GirlState: String, CaseIterable, Sendable {
         case .drag:       return [.drag, .hold, .pamper, .idle]
         case .hold:       return [.hold, .notice, .idle]
         case .teaching:   return [.teaching, .notice, .idle]
+        case .teaching2:  return [.teaching2, .teaching, .notice, .idle]
+        case .dizzy:      return [.dizzy, .idle]
+        case .dizzy2:     return [.dizzy2, .dizzy, .idle]
         default:          return [self, .idle]
         }
     }
@@ -74,7 +100,10 @@ public enum GirlState: String, CaseIterable, Sendable {
         let n = name.lowercased()
         if n.contains("sad") { return .sad }
         if n.contains("afterglow") || n == "end" { return .end }
+        if n.contains("teaching2") || n.contains("teach2") || n.contains("tip2") { return .teaching2 }
         if n.contains("teach") || n.contains("tip") || n.contains("explain") { return .teaching }
+        if n.contains("confused2") || n.contains("dizzy2") { return .dizzy2 }
+        if n.contains("confus") || n.contains("dizzy") { return .dizzy }
         if n.contains("drag") { return .drag }
         if n.contains("hold") || n.contains("grab") || n.contains("lift") || n.contains("pick") { return .hold }
         if n.contains("run2") || n.contains("dash2") || n.contains("walk2") { return .run2 }

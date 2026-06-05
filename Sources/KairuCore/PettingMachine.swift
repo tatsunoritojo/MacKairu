@@ -229,7 +229,7 @@ public struct PettingMachine: Sendable {
         case .sad:
             break // 演出専用。状態機械では遷移しない。
 
-        case .run, .run2, .hold, .drag, .rest, .doze, .teaching:
+        case .run, .run2, .hold, .drag, .rest, .doze, .teaching, .teaching2, .dizzy, .dizzy2:
             // run/hold/drag は上の優先分岐で扱う。rest/doze/teaching は表示専用で state には入らない。
             // 万一ここへ来たら（保持/移動が解けた直後など）待機へ。
             setState(.idle)

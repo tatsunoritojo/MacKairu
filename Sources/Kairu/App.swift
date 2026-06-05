@@ -77,7 +77,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = false
-        panel.isMovableByWindowBackground = true // 背景ドラッグでネイティブ移動
+        // 背景ドラッグでネイティブ移動。裏キャラだけは自前でカーソル追従するため後で切り替える。
+        panel.isMovableByWindowBackground = (model.character != .girl)
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.hidesOnDeactivate = false
 
@@ -235,10 +236,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.orderFrontRegardless()
     }
 
-    @objc private func windowMoved() {
-        model.noteWindowMoved() // ドラッグ判定用に最終移動時刻を記録
-        model.persistPosition()
-    }
+    @objc private func windowMoved() { model.persistPosition() }
 
     @objc private func openSettings() {
         if settingsWindow == nil {

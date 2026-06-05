@@ -20,8 +20,9 @@ struct RootView: View {
             CharacterView(character: model.character, thinking: model.isThinking,
                           scale: model.dolphinScale, fat: model.fatness,
                           swimming: model.isSwimming, flip: model.facingLeft,
-                          girlImage: model.girlCurrentImage, patted: model.isBeingPatted,
-                          dying: model.girlDying)
+                          girlImage: model.girlCurrentImage, girlImageScale: model.girlDisplay.displayScale,
+                          patted: model.isBeingPatted, dying: model.girlDying,
+                          dizzy: model.girlDisplay == .dizzy || model.girlDisplay == .dizzy2)
                 .contentShape(Rectangle())
                 .onTapGesture {
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
