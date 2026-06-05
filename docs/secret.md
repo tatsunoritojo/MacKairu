@@ -6,7 +6,7 @@
 
 **カーソルに甘える、ウザいけど憎めない常駐キャラクター「POIN」。**
 
-[← 表に戻る](../README.md)
+日本語 · [English](secret.en.md) · [← 表に戻る](../README.md)
 
 </div>
 

@@ -8,7 +8,7 @@
 
 A slightly clever, slightly annoying mascot that lives in the corner of your Mac.
 
-[日本語](README.md) ・ `English` ・ [`ura-JP`](docs/secret.md)
+[日本語](README.md) ・ `English` ・ [`secret`](docs/secret.en.md)
 
 <br>
 
