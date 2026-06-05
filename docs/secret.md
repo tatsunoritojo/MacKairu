@@ -55,6 +55,21 @@
 > 反応がうるさい時は、設定の「頭なで反応」をオフに。
 > 掴み・ドラッグは「頭なで反応」オフでも有効です（つまんで運ぶのは別系統）。
 
+### アニメーション
+
+<table align="center">
+  <tr>
+    <td align="center"><img src="images/anim/far-wait.gif" width="150"><br><sub>遠いと眠そう</sub></td>
+    <td align="center"><img src="images/anim/run.gif" width="150"><br><sub>駆け出す</sub></td>
+    <td align="center"><img src="images/anim/nade.gif" width="150"><br><sub>頭なでなで</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="images/anim/carry.gif" width="150"><br><sub>つまんで運ぶ</sub></td>
+    <td align="center"><img src="images/anim/teaching.gif" width="150"><br><sub>解説中（ウインク）</sub></td>
+    <td align="center"><img src="images/anim/dizzy.gif" width="150"><br><sub>振り回すと目を回す</sub></td>
+  </tr>
+</table>
+
 ## そして、消すとき
 
 「**お前を消す方法**」とチャットに打つと——
