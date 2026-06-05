@@ -55,17 +55,34 @@ final class AppModel: ObservableObject {
     private let originYKey = "windowOriginY"
     private let characterKey = "character"
 
-    /// 裏キャラの画像（AI で用意した PNG）。
-    @Published var girlImage: NSImage?
+    /// 裏キャラ（女の子）の論理状態と表示状態。
+    @Published var girlState: GirlState = .idle
+    @Published var girlDisplay: GirlState = .idle
+    private var girlImages: [GirlState: NSImage] = [:]
+    /// 表示すべき裏キャラ画像。
+    var girlCurrentImage: NSImage? { girlImages[girlDisplay] ?? girlImages[.idle] }
+    var hasGirlImages: Bool { girlImages[.idle] != nil }
+
     private var patMonitorGlobal: Any?
     private var patMonitorLocal: Any?
-    private var lastPatMouse: NSPoint?
-    private var patResetWork: DispatchWorkItem?
+    private var girlTimer: Timer?
+    private var mouseHistory: [(p: NSPoint, t: Double)] = []
+    private var headHoverTime: Double = 0
+    private var cooldownUntil: Double = 0
+    private var endUntil: Double = 0
+    private var lastTick: Double = 0
+    private var pamperFlip: Double = 0
 
-    /// 裏キャラ画像の保存先。
-    static var girlImageURL: URL {
+    /// 裏キャラ画像フォルダ。
+    static var girlDir: URL {
         FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".config/mac-concierge/characters/girl.png")
+            .appendingPathComponent(".config/mac-concierge/characters/girl")
+    }
+
+    /// なで反応の ON/OFF（既定オン）。
+    var isNadeEnabled: Bool {
+        let d = UserDefaults.standard
+        return d.object(forKey: "nadeReaction") == nil ? true : d.bool(forKey: "nadeReaction")
     }
 
     init() {
@@ -76,7 +93,7 @@ final class AppModel: ObservableObject {
            let c = Character(rawValue: raw) {
             character = c
         }
-        loadGirlImage()
+        loadGirlImages()
         if config == nil || !(config?.hasKey ?? false) {
             bubble = "最初に API キーを設定してね（メニューバーの\(character.emoji)→「設定…」）"
         } else {
@@ -84,8 +101,11 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func loadGirlImage() {
-        if let img = NSImage(contentsOf: Self.girlImageURL) { girlImage = img }
+    private func loadGirlImages() {
+        for s in GirlState.allCases {
+            let url = Self.girlDir.appendingPathComponent(s.fileName)
+            if let img = NSImage(contentsOf: url) { girlImages[s] = img }
+        }
     }
 
     /// 履歴量に応じた太り具合（0〜1）。裏キャラは太らない。
@@ -171,13 +191,13 @@ final class AppModel: ObservableObject {
         UserDefaults.standard.set(c.rawValue, forKey: characterKey)
         onCharacterChanged?(c)
         if c == .girl {
+            resetGirlState()
             startPatTracking()
-            bubble = girlImage == nil
-                ? "裏キャラの画像がまだないよ。設定 →「裏キャラ」で用意してね。"
-                : "…裏モード。頭、撫でてくれてもいいんだよ？"
+            bubble = hasGirlImages
+                ? "…裏モード。頭、撫でてくれてもいいんだよ？"
+                : "裏キャラの画像がまだないよ。設定 →「裏キャラ」で取り込んでね。"
         } else {
             stopPatTracking()
-            isBeingPatted = false
             bubble = "\(c.emoji) になったよ"
         }
         applyWindowSize(animated: true)
@@ -192,105 +212,143 @@ final class AppModel: ObservableObject {
                               : "通常モードに戻すね。"))
     }
 
-    /// 裏キャラ画像を差し替える（自分で用意した PNG を選ぶ）。
-    func chooseGirlImage() {
+    /// 裏キャラの画像（5枚: 待機/気づき/甘え/甘えループ/余韻）を取り込む。
+    /// ファイル名で状態に振り分ける（noticed/waiting/pampering/pampering2/afterglowing 等）。
+    func importGirlImages() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.png, .jpeg, .image]
-        panel.allowsMultipleSelection = false
-        panel.message = "裏キャラに使う画像（透過PNG推奨）を選んでください"
-        guard panel.runModal() == .OK, let src = panel.url else { return }
-        saveGirlImage(from: src)
-    }
-
-    private func saveGirlImage(from src: URL) {
-        let dst = Self.girlImageURL
-        try? FileManager.default.createDirectory(
-            at: dst.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? FileManager.default.removeItem(at: dst)
-        try? FileManager.default.copyItem(at: src, to: dst)
-        loadGirlImage()
-        if character == .girl { bubble = nil }
-    }
-
-    /// OpenAI の画像生成で裏キャラを作る（OpenAI キー使用時のみ）。
-    func generateGirlImage() {
-        guard let config, config.provider == .openai, config.hasKey else {
-            bubble = "AI生成は OpenAI キーが必要。ChatGPT/Gemini で作って「画像を選ぶ」でもOK。"
-            return
+        panel.allowsMultipleSelection = true
+        panel.message = "裏キャラの画像（5枚）を選んでください。ファイル名で自動振り分けします。"
+        guard panel.runModal() == .OK else { return }
+        let dir = Self.girlDir
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        for url in panel.urls {
+            let name = url.deletingPathExtension().lastPathComponent
+            guard let state = GirlState.from(fileName: name) else { continue }
+            let dst = dir.appendingPathComponent(state.fileName)
+            try? FileManager.default.removeItem(at: dst)
+            try? FileManager.default.copyItem(at: url, to: dst)
         }
-        bubble = "裏キャラを生成中…"
-        let key = config.apiKey
-        Task {
-            if let data = await Self.openAIImage(key: key) {
-                let dst = Self.girlImageURL
-                try? FileManager.default.createDirectory(
-                    at: dst.deletingLastPathComponent(), withIntermediateDirectories: true)
-                try? data.write(to: dst)
-                self.loadGirlImage()
-                self.bubble = nil
-            } else {
-                self.bubble = "生成に失敗。ChatGPT/Gemini で作って「画像を選ぶ」を試してね。"
-            }
+        loadGirlImages()
+        if character == .girl {
+            bubble = hasGirlImages ? nil : "うまく振り分けできなかったかも。ファイル名を確認してね。"
         }
     }
 
-    private static func openAIImage(key: String) async -> Data? {
-        var req = URLRequest(url: URL(string: "https://api.openai.com/v1/images/generations")!)
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
-        let body: [String: Any] = [
-            "model": "gpt-image-1",
-            "prompt": "A cute chibi anime girl mascot, full body, friendly smile, "
-                + "flat simple illustration, centered, transparent background, no text.",
-            "size": "1024x1024",
-            "background": "transparent",
-            "n": 1,
-        ]
-        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        guard let (data, _) = try? await URLSession.shared.data(for: req),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let arr = json["data"] as? [[String: Any]],
-              let b64 = arr.first?["b64_json"] as? String,
-              let imgData = Data(base64Encoded: b64) else { return nil }
-        return imgData
-    }
+    // MARK: - 頭なでなで 状態機械（裏モード）
 
-    // MARK: - 頭なでなで（裏モード）
+    private func resetGirlState() {
+        girlState = .idle
+        headHoverTime = 0
+        cooldownUntil = 0
+        mouseHistory = []
+        lastTick = 0
+        isBeingPatted = false
+    }
 
     func startPatTracking() {
         guard patMonitorGlobal == nil else { return }
         patMonitorGlobal = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
-            DispatchQueue.main.async { self?.handleMouseMoved() }
+            DispatchQueue.main.async { self?.recordMouse() }
         }
         patMonitorLocal = NSEvent.addLocalMonitorForEvents(matching: .mouseMoved) { [weak self] e in
-            DispatchQueue.main.async { self?.handleMouseMoved() }
+            DispatchQueue.main.async { self?.recordMouse() }
             return e
+        }
+        // 20fps で状態を更新。
+        girlTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.tickGirl() }
         }
     }
 
     func stopPatTracking() {
         if let m = patMonitorGlobal { NSEvent.removeMonitor(m); patMonitorGlobal = nil }
         if let m = patMonitorLocal { NSEvent.removeMonitor(m); patMonitorLocal = nil }
-        lastPatMouse = nil
+        girlTimer?.invalidate(); girlTimer = nil
+        mouseHistory = []
     }
 
-    private func handleMouseMoved() {
-        guard character == .girl, let window else { return }
-        let m = NSEvent.mouseLocation
-        let f = window.frame
-        // 頭の領域 = ウィンドウ上部。
-        let head = NSRect(x: f.minX, y: f.minY + f.height * 0.45,
-                          width: f.width, height: f.height * 0.55)
-        guard head.contains(m) else { lastPatMouse = m; return }
-        if let last = lastPatMouse, hypot(m.x - last.x, m.y - last.y) > 2 {
-            isBeingPatted = true
-            patResetWork?.cancel()
-            let work = DispatchWorkItem { [weak self] in self?.isBeingPatted = false }
-            patResetWork = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.7, execute: work)
+    private func recordMouse() {
+        guard character == .girl else { return }
+        mouseHistory.append((NSEvent.mouseLocation, ProcessInfo.processInfo.systemUptime))
+    }
+
+    /// 撫で状態の更新（仕様の状態機械）。
+    private func tickGirl() {
+        let now = ProcessInfo.processInfo.systemUptime
+        let dt = lastTick == 0 ? 0.05 : now - lastTick
+        lastTick = now
+        // 直近 0.4 秒の軌跡だけ残す。
+        mouseHistory.removeAll { now - $0.t > 0.4 }
+
+        // なで反応 OFF / 泳ぎ中 / 画像なし は待機に戻す。
+        guard character == .girl, isNadeEnabled, hasGirlImages, !isSwimming, let window else {
+            if girlState != .idle && girlState != .end { setGirlState(.idle) }
+            return
         }
-        lastPatMouse = m
+
+        let m = NSEvent.mouseLocation
+        // 速度（px/sec）。
+        var speed: CGFloat = 0
+        if let first = mouseHistory.first, mouseHistory.count >= 2 {
+            let span = now - first.t
+            if span > 0.01 { speed = hypot(m.x - first.p.x, m.y - first.p.y) / CGFloat(span) }
+        }
+        // 頭の当たり判定（横長楕円・頭頂〜前髪あたり）。
+        let f = window.frame
+        let hx = f.midX, hy = f.maxY - f.height * 0.20
+        let rx = f.width * 0.32, ry = f.height * 0.16
+        let nx = (m.x - hx) / rx, ny = (m.y - hy) / ry
+        let inZone = (nx * nx + ny * ny) <= 1
+        // 頭付近での左右の揺れ（撫でっぽさ）。
+        let xs = mouseHistory.map { $0.p.x }
+        let xWobble = (xs.max() ?? 0) - (xs.min() ?? 0)
+        let petLike = inZone && xWobble > 8 && xWobble < 140 && speed < 500
+
+        if cooldownUntil > now, girlState != .end {
+            setGirlState(.idle); headHoverTime = 0; return
+        }
+
+        switch girlState {
+        case .idle:
+            if inZone && speed < 400 {
+                headHoverTime += dt
+                if headHoverTime > 0.18 { setGirlState(.notice) }
+            } else { headHoverTime = 0 }
+        case .notice:
+            if !inZone { setGirlState(.idle); headHoverTime = 0 }
+            else if petLike || headHoverTime > 0.35 { setGirlState(.pamper); pamperFlip = 0 }
+            else { headHoverTime += dt }
+        case .pamper:
+            if !inZone || speed > 500 { endPamper(now) }
+            else { pamperFlip += dt; if pamperFlip > 0.25 { pamperFlip = 0; girlState = .pamperLoop } }
+        case .pamperLoop:
+            if !inZone || speed > 500 { endPamper(now) }
+            else {
+                // 甘え中は pamper ↔ pamperLoop の画像をゆっくり往復。
+                pamperFlip += dt
+                if pamperFlip > 0.5 {
+                    pamperFlip = 0
+                    girlDisplay = (girlDisplay == .pamperLoop) ? .pamper : .pamperLoop
+                }
+            }
+        case .end:
+            if now > endUntil { setGirlState(.idle) }
+        }
+        isBeingPatted = (girlState == .pamper || girlState == .pamperLoop)
+    }
+
+    private func setGirlState(_ s: GirlState) {
+        girlState = s
+        girlDisplay = s
+        if s != .pamper && s != .pamperLoop { isBeingPatted = false }
+    }
+
+    private func endPamper(_ now: Double) {
+        setGirlState(.end)
+        endUntil = now + 0.5
+        cooldownUntil = now + 1.5
+        isBeingPatted = false
     }
 
     // MARK: - 文脈の取り込み（クリップボード／スクショ）
@@ -420,6 +478,8 @@ final class AppModel: ObservableObject {
     private func swim() {
         guard isAnnoyEnabled, !isChatOpen, !isThinking,
               let window, let screen = window.screen ?? NSScreen.main else { return }
+        // 裏モードで撫でられ中は動かない（落ち着いて甘えさせる）。
+        if character == .girl && girlState != .idle { return }
         let size = window.frame.size
         let from = window.frame.origin
         let margin = dolphinSide * 0.5

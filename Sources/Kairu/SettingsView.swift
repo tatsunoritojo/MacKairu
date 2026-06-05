@@ -17,6 +17,7 @@ struct SettingsView: View {
     @State private var systemPrompt: String = AppConfig.defaultSystemPrompt
     @State private var resurrect = LaunchAgent.isEnabled
     @State private var annoy = true
+    @State private var nade = true
     @State private var saved = false
 
     private var effectiveModel: String {
@@ -171,12 +172,20 @@ struct SettingsView: View {
             .pickerStyle(.segmented)
 
             if model.character == .girl {
-                HStack(spacing: 8) {
-                    Text("裏キャラ 💗（チャットに「裏モード」で切替）")
-                        .font(.system(size: 10)).foregroundStyle(.secondary)
-                    Spacer()
-                    Button("画像を選ぶ") { model.chooseGirlImage() }.font(.system(size: 11))
-                    Button("AIで生成") { model.generateGirlImage() }.font(.system(size: 11))
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 8) {
+                        Text("裏キャラ 💗（チャットに「裏モード」で切替）")
+                            .font(.system(size: 10)).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("画像を取り込む（5枚）") { model.importGirlImages() }
+                            .font(.system(size: 11))
+                    }
+                    Toggle(isOn: $nade) {
+                        Text("頭なで反応").font(.system(size: 11))
+                    }
+                    .onChange(of: nade) { _, on in
+                        UserDefaults.standard.set(on, forKey: "nadeReaction")
+                    }
                 }
             }
         }
@@ -202,6 +211,7 @@ struct SettingsView: View {
         resurrect = LaunchAgent.isEnabled
         let d = UserDefaults.standard
         annoy = d.object(forKey: "annoyMode") == nil ? true : d.bool(forKey: "annoyMode")
+        nade = d.object(forKey: "nadeReaction") == nil ? true : d.bool(forKey: "nadeReaction")
         if let c = model.config {
             provider = c.provider
             apiKey = c.apiKey
