@@ -65,7 +65,19 @@ public enum RequestBuilder {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue(config.apiKey, forHTTPHeaderField: "x-api-key")
         req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-        let messages = history.map { ["role": $0.role == .user ? "user" : "assistant", "content": $0.text] }
+        let messages = history.map { m -> [String: Any] in
+            let role = m.role == .user ? "user" : "assistant"
+            guard let img = m.image else {
+                return ["role": role, "content": m.text]
+            }
+            // 画像つきは content をブロック配列に。
+            let content: [[String: Any]] = [
+                ["type": "image",
+                 "source": ["type": "base64", "media_type": img.mediaType, "data": img.base64]],
+                ["type": "text", "text": m.text],
+            ]
+            return ["role": role, "content": content]
+        }
         let body: [String: Any] = [
             "model": config.model,
             "max_tokens": 1024,
@@ -82,7 +94,18 @@ public enum RequestBuilder {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(config.apiKey)", forHTTPHeaderField: "Authorization")
         var messages: [[String: Any]] = [["role": "system", "content": config.effectiveSystemPrompt]]
-        messages += history.map { ["role": $0.role == .user ? "user" : "assistant", "content": $0.text] }
+        messages += history.map { m -> [String: Any] in
+            let role = m.role == .user ? "user" : "assistant"
+            guard let img = m.image else {
+                return ["role": role, "content": m.text]
+            }
+            let content: [[String: Any]] = [
+                ["type": "text", "text": m.text],
+                ["type": "image_url",
+                 "image_url": ["url": "data:\(img.mediaType);base64,\(img.base64)"]],
+            ]
+            return ["role": role, "content": content]
+        }
         let body: [String: Any] = ["model": config.model, "messages": messages]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         return req
@@ -96,7 +119,13 @@ public enum RequestBuilder {
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let contents = history.map { m -> [String: Any] in
-            ["role": m.role == .user ? "user" : "model", "parts": [["text": m.text]]]
+            let role = m.role == .user ? "user" : "model"
+            var parts: [[String: Any]] = []
+            if let img = m.image {
+                parts.append(["inline_data": ["mime_type": img.mediaType, "data": img.base64]])
+            }
+            parts.append(["text": m.text])
+            return ["role": role, "parts": parts]
         }
         let body: [String: Any] = [
             "system_instruction": ["parts": [["text": config.effectiveSystemPrompt]]],
