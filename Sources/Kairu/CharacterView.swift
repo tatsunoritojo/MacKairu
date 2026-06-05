@@ -15,10 +15,14 @@ struct CharacterView: View {
     var flip: Bool = false
     /// 裏キャラの画像。
     var girlImage: NSImage? = nil
+    /// 裏キャラ画像ごとの見かけサイズ補正（素材間の描画サイズ差を吸収）。
+    var girlImageScale: Double = 1.0
     /// 裏キャラが頭を撫でられている最中。
     var patted: Bool = false
     /// 「お前を消す方法」で消される最中（ブルブル震えてフェードアウト）。
     var dying: Bool = false
+    /// 振り回されて目を回している最中（ふらふら揺れる）。
+    var dizzy: Bool = false
 
     @State private var dyingStart: Double?
 
@@ -30,7 +34,8 @@ struct CharacterView: View {
             let blinkPhase = t.truncatingRemainder(dividingBy: 4.0)
             let isBlinking = blinkPhase < 0.15
             let swimWiggle = swimming ? sin(t * 8) * 6 : 0
-            let tilt = (thinking ? sin(t * 3) * 6 : 0) + swimWiggle
+            let dizzyWobble = dizzy ? sin(t * 6.5) * 10 : 0
+            let tilt = (thinking ? sin(t * 3) * 6 : 0) + swimWiggle + dizzyWobble
             let fatW = 1 + fat * 0.12
             let fatH = 1 + fat * 0.24
             let side = 120 * scale
@@ -80,6 +85,7 @@ struct CharacterView: View {
                     .interpolation(.high)      // 最高画質で補間
                     .antialiased(true)
                     .scaledToFit()
+                    .scaleEffect(girlImageScale)   // 素材間サイズ差の補正
                     .scaleEffect((patted && !dying) ? 1.06 : 1.0)
                     .animation(.spring(response: 0.25, dampingFraction: 0.5), value: patted)
                     .offset(x: shakeX, y: shakeY)
