@@ -22,6 +22,23 @@ final class CharacterTests: XCTestCase {
         }
     }
 
+    func testGirlStateFileNameMapping() {
+        XCTAssertEqual(GirlState.from(fileName: "noticed"), .idle)
+        XCTAssertEqual(GirlState.from(fileName: "waiting"), .notice)
+        XCTAssertEqual(GirlState.from(fileName: "pampering"), .pamper)
+        XCTAssertEqual(GirlState.from(fileName: "pampering2"), .pamperLoop)
+        XCTAssertEqual(GirlState.from(fileName: "afterglowing"), .end)
+        // 状態名そのままも通る
+        XCTAssertEqual(GirlState.from(fileName: "idle"), .idle)
+        XCTAssertEqual(GirlState.from(fileName: "pamperLoop"), .pamperLoop)
+        XCTAssertNil(GirlState.from(fileName: "random"))
+    }
+
+    func testGirlStateFileName() {
+        XCTAssertEqual(GirlState.idle.fileName, "idle.png")
+        XCTAssertEqual(GirlState.allCases.count, 5)
+    }
+
     func testSecretMode() {
         XCTAssertTrue(SecretMode.isTriggered(by: "裏モード"))
         XCTAssertTrue(SecretMode.isTriggered(by: "  裏 モード "))
