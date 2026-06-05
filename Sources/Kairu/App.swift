@@ -100,6 +100,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             name: NSWindow.didMoveNotification, object: panel)
 
         model.presentSettings = { [weak self] in self?.openSettings() }
+        model.onCharacterChanged = { [weak self] c in
+            self?.statusItem?.button?.title = c.emoji
+        }
 
         setupMainMenu()
         setupQuitMonitor()
@@ -157,11 +160,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.title = "🐬"
+        statusItem.button?.title = model.character.emoji
         let menu = NSMenu()
         menu.autoenablesItems = false // 常に有効（無効化で押せない事故を防ぐ）
 
         addItem(to: menu, "MacKairu を表示", #selector(showDolphin))
+
+        // キャラクター切替（裏キャラは除く）
+        let charItem = NSMenuItem(title: "キャラクター", action: nil, keyEquivalent: "")
+        let charMenu = NSMenu()
+        charMenu.autoenablesItems = false
+        for c in Character.selectable {
+            let item = NSMenuItem(title: "\(c.emoji) \(c.label)",
+                                  action: #selector(changeCharacter(_:)), keyEquivalent: "")
+            item.representedObject = c.rawValue
+            item.target = self
+            charMenu.addItem(item)
+        }
+        charItem.submenu = charMenu
+        menu.addItem(charItem)
 
         let sizeItem = NSMenuItem(title: "サイズ", action: nil, keyEquivalent: "")
         let sizeMenu = NSMenu()
@@ -199,6 +216,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func changeSize(_ sender: NSMenuItem) {
         if let value = sender.representedObject as? Double { model.setScale(value) }
+    }
+
+    @objc private func changeCharacter(_ sender: NSMenuItem) {
+        if let raw = sender.representedObject as? String, let c = Character(rawValue: raw) {
+            model.setCharacter(c)
+            panel.orderFrontRegardless()
+        }
     }
 
     @objc private func openConfig() {

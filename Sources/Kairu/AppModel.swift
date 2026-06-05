@@ -14,6 +14,13 @@ final class AppModel: ObservableObject {
     /// 吹き出しに出す一言（アイドル時のヒントやエラー表示）。
     @Published var bubble: String? = "やあ！Mac のことなら何でも聞いてね 🐬"
 
+    /// 表示中のキャラクター。
+    @Published var character: Character = .dolphin
+    /// 裏モードで頭を撫でられている最中か。
+    @Published var isBeingPatted = false
+    /// キャラ変更を AppDelegate に伝える（メニューバー絵文字の更新など）。
+    var onCharacterChanged: ((Character) -> Void)?
+
     /// イルカの大きさ倍率（0.6〜2.2）。ピンチやメニューで変更。
     @Published var dolphinScale: Double = 1.0
 
@@ -46,18 +53,43 @@ final class AppModel: ObservableObject {
     private let scaleKey = "dolphinScale"
     private let originXKey = "windowOriginX"
     private let originYKey = "windowOriginY"
+    private let characterKey = "character"
+
+    /// 裏キャラの画像（AI で用意した PNG）。
+    @Published var girlImage: NSImage?
+    private var patMonitorGlobal: Any?
+    private var patMonitorLocal: Any?
+    private var lastPatMouse: NSPoint?
+    private var patResetWork: DispatchWorkItem?
+
+    /// 裏キャラ画像の保存先。
+    static var girlImageURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".config/mac-concierge/characters/girl.png")
+    }
 
     init() {
         self.config = AppConfig.load()
         let saved = UserDefaults.standard.double(forKey: scaleKey)
         if saved > 0 { dolphinScale = min(10.0, max(0.6, saved)) }
+        if let raw = UserDefaults.standard.string(forKey: characterKey),
+           let c = Character(rawValue: raw) {
+            character = c
+        }
+        loadGirlImage()
         if config == nil || !(config?.hasKey ?? false) {
             bubble = "最初に API キーを設定してね（メニューバーの🐬→「設定…」）"
         }
     }
 
-    /// 履歴量に応じた太り具合（0〜1）。
-    var fatness: Double { Fatness.level(messageCount: messages.count) }
+    private func loadGirlImage() {
+        if let img = NSImage(contentsOf: Self.girlImageURL) { girlImage = img }
+    }
+
+    /// 履歴量に応じた太り具合（0〜1）。裏キャラは太らない。
+    var fatness: Double {
+        character == .girl ? 0 : Fatness.level(messageCount: messages.count)
+    }
 
     // MARK: - ウィンドウサイズ（イルカの倍率＋太り具合に応じて変わる）
 
@@ -128,6 +160,134 @@ final class AppModel: ObservableObject {
     func clearChat() {
         messages = []
         bubble = nil
+    }
+
+    // MARK: - キャラクター / 裏モード
+
+    func setCharacter(_ c: Character) {
+        character = c
+        UserDefaults.standard.set(c.rawValue, forKey: characterKey)
+        onCharacterChanged?(c)
+        if c == .girl {
+            startPatTracking()
+            if girlImage == nil {
+                bubble = "裏キャラの画像がまだないよ。設定 →「裏キャラ」で用意してね。"
+            }
+        } else {
+            stopPatTracking()
+            isBeingPatted = false
+        }
+        applyWindowSize(animated: true)
+    }
+
+    /// チャットの「裏モード」呪文でトグル。
+    private func toggleSecretMode() {
+        let goingSecret = character != .girl
+        setCharacter(goingSecret ? .girl : .dolphin)
+        messages.append(ChatMessage(role: .assistant,
+            text: goingSecret ? "…裏モード。頭、撫でてくれてもいいんだよ？"
+                              : "通常モードに戻すね。"))
+    }
+
+    /// 裏キャラ画像を差し替える（自分で用意した PNG を選ぶ）。
+    func chooseGirlImage() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.png, .jpeg, .image]
+        panel.allowsMultipleSelection = false
+        panel.message = "裏キャラに使う画像（透過PNG推奨）を選んでください"
+        guard panel.runModal() == .OK, let src = panel.url else { return }
+        saveGirlImage(from: src)
+    }
+
+    private func saveGirlImage(from src: URL) {
+        let dst = Self.girlImageURL
+        try? FileManager.default.createDirectory(
+            at: dst.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? FileManager.default.removeItem(at: dst)
+        try? FileManager.default.copyItem(at: src, to: dst)
+        loadGirlImage()
+        if character == .girl { bubble = nil }
+    }
+
+    /// OpenAI の画像生成で裏キャラを作る（OpenAI キー使用時のみ）。
+    func generateGirlImage() {
+        guard let config, config.provider == .openai, config.hasKey else {
+            bubble = "AI生成は OpenAI キーが必要。ChatGPT/Gemini で作って「画像を選ぶ」でもOK。"
+            return
+        }
+        bubble = "裏キャラを生成中…"
+        let key = config.apiKey
+        Task {
+            if let data = await Self.openAIImage(key: key) {
+                let dst = Self.girlImageURL
+                try? FileManager.default.createDirectory(
+                    at: dst.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try? data.write(to: dst)
+                self.loadGirlImage()
+                self.bubble = nil
+            } else {
+                self.bubble = "生成に失敗。ChatGPT/Gemini で作って「画像を選ぶ」を試してね。"
+            }
+        }
+    }
+
+    private static func openAIImage(key: String) async -> Data? {
+        var req = URLRequest(url: URL(string: "https://api.openai.com/v1/images/generations")!)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        let body: [String: Any] = [
+            "model": "gpt-image-1",
+            "prompt": "A cute chibi anime girl mascot, full body, friendly smile, "
+                + "flat simple illustration, centered, transparent background, no text.",
+            "size": "1024x1024",
+            "background": "transparent",
+            "n": 1,
+        ]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        guard let (data, _) = try? await URLSession.shared.data(for: req),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let arr = json["data"] as? [[String: Any]],
+              let b64 = arr.first?["b64_json"] as? String,
+              let imgData = Data(base64Encoded: b64) else { return nil }
+        return imgData
+    }
+
+    // MARK: - 頭なでなで（裏モード）
+
+    func startPatTracking() {
+        guard patMonitorGlobal == nil else { return }
+        patMonitorGlobal = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
+            DispatchQueue.main.async { self?.handleMouseMoved() }
+        }
+        patMonitorLocal = NSEvent.addLocalMonitorForEvents(matching: .mouseMoved) { [weak self] e in
+            DispatchQueue.main.async { self?.handleMouseMoved() }
+            return e
+        }
+    }
+
+    func stopPatTracking() {
+        if let m = patMonitorGlobal { NSEvent.removeMonitor(m); patMonitorGlobal = nil }
+        if let m = patMonitorLocal { NSEvent.removeMonitor(m); patMonitorLocal = nil }
+        lastPatMouse = nil
+    }
+
+    private func handleMouseMoved() {
+        guard character == .girl, let window else { return }
+        let m = NSEvent.mouseLocation
+        let f = window.frame
+        // 頭の領域 = ウィンドウ上部。
+        let head = NSRect(x: f.minX, y: f.minY + f.height * 0.45,
+                          width: f.width, height: f.height * 0.55)
+        guard head.contains(m) else { lastPatMouse = m; return }
+        if let last = lastPatMouse, hypot(m.x - last.x, m.y - last.y) > 2 {
+            isBeingPatted = true
+            patResetWork?.cancel()
+            let work = DispatchWorkItem { [weak self] in self?.isBeingPatted = false }
+            patResetWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.7, execute: work)
+        }
+        lastPatMouse = m
     }
 
     // MARK: - 文脈の取り込み（クリップボード／スクショ）
@@ -242,6 +402,7 @@ final class AppModel: ObservableObject {
     func startMischief() {
         scheduleSwim()
         scheduleChatter()
+        if character == .girl { startPatTracking() }
     }
 
     private func scheduleSwim() {
@@ -260,8 +421,8 @@ final class AppModel: ObservableObject {
         let from = window.frame.origin
         let margin = dolphinSide * 0.5
 
-        // 20%: マウスカーソルの位置へ。80%: ランダムに大きく泳ぐ。
-        let goToCursor = Double.random(in: 0 ..< 1) < 0.2
+        // 裏モードは100%カーソルへ。通常は20%。
+        let goToCursor = character == .girl ? true : (Double.random(in: 0 ..< 1) < 0.2)
         let targetScreen: NSScreen
         var cx: CGFloat
         var cy: CGFloat
@@ -341,6 +502,14 @@ final class AppModel: ObservableObject {
             messages.append(ChatMessage(role: .assistant,
                 text: "「お前を消す方法」について調べました。\n……さようなら。"))
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { KairuQuit.now() }
+            return
+        }
+
+        // 裏モードの呪文。
+        if SecretMode.isTriggered(by: typed) {
+            messages.append(ChatMessage(role: .user, text: typed))
+            toggleSecretMode()
+            clearPending()
             return
         }
 
