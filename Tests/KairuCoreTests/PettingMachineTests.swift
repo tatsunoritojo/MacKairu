@@ -72,18 +72,39 @@ final class PettingMachineTests: XCTestCase {
 
     func testSustainedExitEndsPamperAfterGrace() {
         var m = PettingMachine()
-        m.update(near(wobble: 40)) // pamper
+        for _ in 0..<41 { m.update(near(wobble: 40)) } // 約2秒撫でる → 余韻 ~1.5秒
         // 猶予 0.35s を超えて離れ続けると end（余韻）へ。
         for _ in 0..<9 { m.update(away()) } // 0.45s 離脱
         XCTAssertEqual(m.state, .end)
-        // endDuration=0.5 経過で idle に戻る。
-        for _ in 0..<11 { m.update(away()) }
+        // 余韻（撫で2秒 → ~1.5秒）経過で idle に戻る。
+        for _ in 0..<40 { m.update(away()) } // 2.0s 進めれば確実に idle
         XCTAssertEqual(m.state, .idle)
+    }
+
+    /// 余韻は下限0.5秒・上限4秒で、撫で時間の指数飽和カーブで決まる。
+    func testAfterglowHasFloorAndCap() {
+        // 一瞬の撫で（1フレーム）でも、最低 0.5 秒は満足顔（end）が残る。
+        var short = PettingMachine()
+        short.update(near(wobble: 40))            // pamper（撫で時間ほぼ0 → 余韻≒下限0.5s）
+        for _ in 0..<9 { short.update(away()) }   // 猶予超で end へ
+        XCTAssertEqual(short.state, .end)         // 即 idle ではなく、下限ぶん残る
+        for _ in 0..<20 { short.update(away()) }  // 1.0s 進めれば下限0.5sを確実に超える
+        XCTAssertEqual(short.state, .idle)
+
+        // 長い撫で（60秒相当）→ 余韻は上限 4 秒で頭打ち。
+        var long = PettingMachine()
+        for _ in 0..<1200 { long.update(near(wobble: 40)) }
+        for _ in 0..<9 { long.update(away()) }
+        XCTAssertEqual(long.state, .end)
+        for _ in 0..<70 { long.update(away()) }   // 3.5s 経過、まだ余韻
+        XCTAssertEqual(long.state, .end)
+        for _ in 0..<20 { long.update(away()) }   // 合計 4s 超で idle
+        XCTAssertEqual(long.state, .idle)
     }
 
     func testCanRePetImmediatelyAfterRelease() {
         var m = PettingMachine()
-        m.update(near(wobble: 40))            // pamper
+        for _ in 0..<41 { m.update(near(wobble: 40)) } // 撫でて余韻を確保
         for _ in 0..<9 { m.update(away()) }   // 猶予超で end へ
         XCTAssertEqual(m.state, .end)
         // 余韻中でも撫で直したら即復帰（撫でたい時に撫でられる）。

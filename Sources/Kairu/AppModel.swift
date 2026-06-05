@@ -24,6 +24,15 @@ final class AppModel: ObservableObject {
     /// イルカの大きさ倍率（0.6〜2.2）。ピンチやメニューで変更。
     @Published var dolphinScale: Double = 1.0
 
+    /// チャット欄のサイズ（リサイズ可能・永続化）。グリップのドラッグで変える。
+    @Published var chatWidth: CGFloat = 300
+    @Published var chatHeight: CGFloat = 380
+    /// リサイズ開始時のサイズ（ドラッグ中の基準）。
+    private var chatResizeStart: NSSize?
+    /// チャット欄サイズの可動域。
+    static let chatMinSize = NSSize(width: 280, height: 300)
+    static let chatMaxSize = NSSize(width: 720, height: 820)
+
     /// 取り込み中の文脈（クリップボードのテキスト）。
     @Published var pendingText: String?
     /// 取り込み中の画像（スクショ等）。
@@ -61,6 +70,8 @@ final class AppModel: ObservableObject {
     private let originXKey = "windowOriginX"
     private let originYKey = "windowOriginY"
     private let characterKey = "character"
+    private let chatWidthKey = "chatWidth"
+    private let chatHeightKey = "chatHeight"
 
     /// 裏キャラ（女の子）の論理状態と表示状態。
     @Published var girlState: GirlState = .idle
@@ -114,6 +125,7 @@ final class AppModel: ObservableObject {
     private let sadComfortTime: Double = 0.9     // これだけ撫でると泣き止む
     private var hurtfulStreak = 0                // 復帰させずに傷つけ続けた回数
     private let sadLockThreshold = 15            // これを超えると POIN をロック
+    private var hurtRegisteredForSend = false    // 同一送信での二重カウント防止
 
     /// POIN を泣き止ませた累計回数（それを目的に遊ぶ人向けの計測）。
     private(set) var poinRecoverCount: Int {
@@ -150,6 +162,10 @@ final class AppModel: ObservableObject {
         self.config = AppConfig.load()
         let saved = UserDefaults.standard.double(forKey: scaleKey)
         if saved > 0 { dolphinScale = min(10.0, max(0.6, saved)) }
+        let cw = UserDefaults.standard.double(forKey: chatWidthKey)
+        let ch = UserDefaults.standard.double(forKey: chatHeightKey)
+        if cw > 0 { chatWidth = min(Self.chatMaxSize.width, max(Self.chatMinSize.width, cw)) }
+        if ch > 0 { chatHeight = min(Self.chatMaxSize.height, max(Self.chatMinSize.height, ch)) }
         if let raw = UserDefaults.standard.string(forKey: characterKey),
            let c = Character(rawValue: raw) {
             character = c
@@ -201,7 +217,10 @@ final class AppModel: ObservableObject {
     }
 
     var openSize: NSSize {
-        NSSize(width: max(324, dolphinSide + 24), height: 380 + 8 + dolphinSide + 24 + 16)
+        // チャット欄（可変）＋キャラの大きさの両方を収めるウィンドウサイズ。
+        // 横: チャット幅とキャラ幅の大きい方＋左右パディング。縦: チャット＋間隔＋キャラ＋余白。
+        NSSize(width: max(chatWidth + 24, dolphinSide + 24),
+               height: chatHeight + 8 + dolphinSide + 24 + 16)
     }
 
     var currentTargetSize: NSSize { isChatOpen ? openSize : closedSize }
@@ -229,9 +248,17 @@ final class AppModel: ObservableObject {
         guard let window else { return }
         let target = currentTargetSize
         let old = window.frame
-        let newFrame = NSRect(
-            x: old.maxX - target.width, y: old.minY,
-            width: target.width, height: target.height)
+        // 右下を基準に成長（maxX・minY を固定）。
+        var x = old.maxX - target.width
+        var y = old.minY
+        // 画面サイズ・キャラの大きさに合わせて動的調整: はみ出すなら画面内へ寄せる。
+        // チャットを開いた時や大きいキャラの時に、欄が画面外に出て見切れるのを防ぐ。
+        if let screen = window.screen ?? NSScreen.main {
+            let v = screen.visibleFrame
+            if target.width <= v.width { x = min(max(x, v.minX), v.maxX - target.width) }
+            if target.height <= v.height { y = min(max(y, v.minY), v.maxY - target.height) }
+        }
+        let newFrame = NSRect(x: x, y: y, width: target.width, height: target.height)
         window.setFrame(newFrame, display: true, animate: animated)
         saveOrigin()
     }
@@ -254,6 +281,31 @@ final class AppModel: ObservableObject {
     func pinchEnded() {
         pinchStart = nil
         UserDefaults.standard.set(dolphinScale, forKey: scaleKey)
+        saveOrigin()
+    }
+
+    // MARK: - チャット欄のリサイズ（グリップのドラッグ）
+
+    /// リサイズ開始（基準サイズを記録）。
+    func chatResizeBegan() {
+        if chatResizeStart == nil {
+            chatResizeStart = NSSize(width: chatWidth, height: chatHeight)
+        }
+    }
+
+    /// ドラッグ量からチャット欄サイズを更新する（基準サイズ＋累積移動）。
+    func chatResizeChanged(dx: CGFloat, dy: CGFloat) {
+        let base = chatResizeStart ?? NSSize(width: chatWidth, height: chatHeight)
+        chatWidth = min(Self.chatMaxSize.width, max(Self.chatMinSize.width, base.width + dx))
+        chatHeight = min(Self.chatMaxSize.height, max(Self.chatMinSize.height, base.height + dy))
+        applyWindowSize(animated: false)
+    }
+
+    /// リサイズ確定（サイズを永続化）。
+    func chatResizeEnded() {
+        chatResizeStart = nil
+        UserDefaults.standard.set(chatWidth, forKey: chatWidthKey)
+        UserDefaults.standard.set(chatHeight, forKey: chatHeightKey)
         saveOrigin()
     }
 
@@ -675,26 +727,11 @@ final class AppModel: ObservableObject {
         if hurtfulStreak >= sadLockThreshold { lockPoin() }
     }
 
-    /// キーワードで拾えなかった発話を、AI 自身に「傷つける内容か」を判定させる（非同期）。
-    private func judgeHurtfulByAI(_ text: String) {
-        guard let config, character == .girl, !poinLocked else { return }
-        var cfg = config
-        cfg.systemPrompt = """
-        あなたは短い分類器です。次のユーザー発話が、かわいい常駐キャラクターに対して
-        侮辱・罵倒・冷たく突き放す・存在を否定するなど「相手を傷つける」内容かを判定します。
-        単なる難しい要求・批判的でも丁寧な指摘・通常の質問は「傷つけない」に分類します。
-        出力は yes か no の1語のみ。
-        """
-        let client = AIClient(config: cfg)
-        let probe = [ChatMessage(role: .user, text: text)]
-        Task { [weak self] in
-            guard let reply = try? await client.send(history: probe) else { return }
-            let yes = reply.lowercased().contains("yes")
-            await MainActor.run {
-                guard let self, yes, self.character == .girl, !self.poinLocked else { return }
-                self.registerHurt()
-            }
-        }
+    /// POIN の返答末尾の気分タグ [[mood:...]] を取り除く（表示用）。
+    private static func stripMoodTags(_ text: String) -> String {
+        text.replacingOccurrences(of: #"\[\[mood:[a-zA-Z]+\]\]"#,
+                                  with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// 撫でて慰められて泣き止む。累計回数を増やす。
@@ -1004,13 +1041,12 @@ final class AppModel: ObservableObject {
         messages.append(ChatMessage(role: .user, text: text, image: image))
         clearPending()
 
-        // 心無い言葉の判定。明白な語はキーワードで即反応、外れたものは AI に判定させる。
-        if character == .girl, !poinLocked, !typed.isEmpty {
-            if HurtfulText.isHurtful(typed) {
-                registerHurt()
-            } else {
-                judgeHurtfulByAI(typed)
-            }
+        // 心無い言葉の判定。明白な語はキーワードで即反応（遅延ゼロ）。
+        // 微妙な冷たさは、POIN 自身の返答に付く気分タグ（後述）で拾う。
+        hurtRegisteredForSend = false
+        if character == .girl, !poinLocked, HurtfulText.isHurtful(typed) {
+            registerHurt()
+            hurtRegisteredForSend = true
         }
 
         guard let config else {
@@ -1026,8 +1062,16 @@ final class AppModel: ObservableObject {
         let history = messages
         Task {
             do {
-                let reply = try await client.send(history: history)
+                var reply = try await client.send(history: history)
+                // 裏モードは返答末尾の気分タグを読み取り、表示からは消す。
+                var hurt = false
+                if self.character == .girl {
+                    hurt = reply.contains("[[mood:hurt]]")
+                    reply = Self.stripMoodTags(reply)
+                }
                 self.messages.append(ChatMessage(role: .assistant, text: reply))
+                // POIN 自身が「傷ついた」と示したら悲しくなる（キーワード未検知時のみ）。
+                if hurt, !self.hurtRegisteredForSend { self.registerHurt() }
             } catch {
                 let msg = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
                 self.messages.append(ChatMessage(role: .assistant, text: "⚠️ \(msg)"))

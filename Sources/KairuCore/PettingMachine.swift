@@ -29,8 +29,13 @@ public struct PettingMachine: Sendable {
         /// 離脱の猶予（秒）。ゾーン外/速度超過がこの秒数“継続”して初めて終了する（ヒステリシス）。
         /// 撫で中の一瞬のはみ出しや速いストロークでは終わらせない。
         public var releaseGrace: Double = 0.35
-        /// 余韻（end「…もう終わり？」）の表示時間（秒）。
-        public var endDuration: Double = 0.5
+        /// 余韻（end「…満足」）の表示時間は撫で時間に対して「指数飽和カーブ」で決める。
+        /// 線形ではなく、最初は急に伸び、徐々にゆったり上限へ近づく（パレート図のような形）。
+        ///   余韻 = min + (max - min) × (1 - e^(-撫で時間 / τ))
+        /// この間は state が .end のままなので、呼び出し側の自動移動（swim）も抑止される。
+        public var endDurationMin: Double = 0.5     // 余韻の下限（一瞬の撫ででも満足顔を残す）
+        public var endDurationMax: Double = 4.0     // 余韻の上限（秒）
+        public var endTimeConstant: Double = 6.0    // τ: 小さいほど早く上限へ近づく
         /// 余韻のあと再反応を抑えるクールダウン（秒）。実質ゼロ（すぐ撫で直せる）。
         public var cooldown: Double = 0.25
 
@@ -95,6 +100,8 @@ public struct PettingMachine: Sendable {
     private var pamperFlip: Double = 0
     private var cooldownRemaining: Double = 0
     private var endRemaining: Double = 0
+    /// 今回の撫でセッションで撫でられ続けた累積時間（秒）。余韻の長さの基準。
+    private var petDuration: Double = 0
     private var restPhase: Double = 0
     private var runPhase: Double = 0
     /// 離脱猶予の残り（秒）。撫で中に良条件へ戻るとリセットされる。
@@ -112,6 +119,7 @@ public struct PettingMachine: Sendable {
         pamperFlip = 0
         cooldownRemaining = 0
         endRemaining = 0
+        petDuration = 0
         restPhase = 0
         releaseGraceRemaining = 0
     }
@@ -257,6 +265,7 @@ public struct PettingMachine: Sendable {
         setState(.pamper)
         pamperFlip = 0
         headHoverTime = 0
+        petDuration = 0   // セッションごとに撫で時間を測り直す
         releaseGraceRemaining = config.releaseGrace
     }
 
@@ -272,12 +281,16 @@ public struct PettingMachine: Sendable {
             return false
         }
         releaseGraceRemaining = config.releaseGrace
+        petDuration += input.dt   // 撫でられ続けた時間を加算
         return true
     }
 
     private mutating func endPamper() {
         setState(.end)
-        endRemaining = config.endDuration
+        // 余韻は撫で時間の指数飽和カーブ。最初は急に伸び、長く撫でるほど頭打ちに近づく。
+        let span = config.endDurationMax - config.endDurationMin
+        let frac = 1 - exp(-petDuration / config.endTimeConstant)   // 0→1（飽和）
+        endRemaining = config.endDurationMin + span * frac
         cooldownRemaining = config.cooldown
         releaseGraceRemaining = 0
     }
