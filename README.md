@@ -100,4 +100,11 @@ MIT License © tatsunoritojo
 
 <div align="center">
 <sub>You can run, but you can't delete.</sub>
+
+<br><br>
+
+<a href="docs/secret.md"><img src="docs/images/anim/nade.gif" width="96" alt="?"></a>
+<br>
+<sub><a href="docs/secret.md">…?</a></sub>
+
 </div>
