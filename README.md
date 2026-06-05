@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/images/kairu.svg" width="190" alt="MacKairu">
+<img src="docs/images/banner.png" alt="POIN / MacKairu — Desktop Mascot Assistant" width="900">
 
 # MacKairu（マッカイル）🐬
 

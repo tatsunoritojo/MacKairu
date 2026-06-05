@@ -17,6 +17,10 @@ struct CharacterView: View {
     var girlImage: NSImage? = nil
     /// 裏キャラが頭を撫でられている最中。
     var patted: Bool = false
+    /// 「お前を消す方法」で消される最中（ブルブル震えてフェードアウト）。
+    var dying: Bool = false
+
+    @State private var dyingStart: Double?
 
     var body: some View {
         TimelineView(.animation) { timeline in
@@ -54,18 +58,29 @@ struct CharacterView: View {
             .animation(.spring(response: 0.4, dampingFraction: 0.7), value: fat)
             .animation(.easeInOut(duration: 0.3), value: flip)
             .animation(.easeInOut(duration: 0.25), value: character)
+            .onChange(of: dying) { _, d in
+                dyingStart = d ? Date().timeIntervalSinceReferenceDate : nil
+            }
         }
     }
 
-    /// 裏キャラ（画像＋なでなで演出）。
+    /// 裏キャラ（画像＋なでなで＋終了演出）。
     @ViewBuilder
     private func girlView(side: CGFloat, t: Double) -> some View {
+        // 終了演出: 5 秒かけてフェード、ブルブル震える。
+        let elapsed = dying ? max(0, t - (dyingStart ?? t)) : 0
+        let fade = dying ? max(0, 1 - elapsed / 5) : 1
+        let shakeX = dying ? CGFloat(sin(t * 47)) * 3 : 0
+        let shakeY = dying ? CGFloat(cos(t * 53)) * 2.5 : 0
+
         ZStack {
             if let img = girlImage {
                 Image(nsImage: img)
                     .resizable().scaledToFit()
-                    .scaleEffect(patted ? 1.06 : 1.0)
+                    .scaleEffect((patted && !dying) ? 1.06 : 1.0)
                     .animation(.spring(response: 0.25, dampingFraction: 0.5), value: patted)
+                    .offset(x: shakeX, y: shakeY)
+                    .opacity(fade)
             } else {
                 ZStack {
                     Circle().fill(Color.pink.opacity(0.18))
@@ -74,8 +89,8 @@ struct CharacterView: View {
                         .foregroundStyle(.pink.opacity(0.7))
                 }
             }
-            // なでなで中はハートが舞う。
-            if patted {
+            // なでなで中はハートが舞う（終了演出中は出さない）。
+            if patted && !dying {
                 ForEach(0..<3, id: \.self) { i in
                     let phase = t * 1.5 + Double(i) * 0.7
                     let up = CGFloat((phase.truncatingRemainder(dividingBy: 1.0)))

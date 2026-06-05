@@ -28,6 +28,7 @@ final class CharacterTests: XCTestCase {
         XCTAssertEqual(GirlState.from(fileName: "pampering"), .pamper)
         XCTAssertEqual(GirlState.from(fileName: "pampering2"), .pamperLoop)
         XCTAssertEqual(GirlState.from(fileName: "afterglowing"), .end)
+        XCTAssertEqual(GirlState.from(fileName: "sad"), .sad)
         // 状態名そのままも通る
         XCTAssertEqual(GirlState.from(fileName: "idle"), .idle)
         XCTAssertEqual(GirlState.from(fileName: "pamperLoop"), .pamperLoop)
@@ -36,7 +37,7 @@ final class CharacterTests: XCTestCase {
 
     func testGirlStateFileName() {
         XCTAssertEqual(GirlState.idle.fileName, "idle.png")
-        XCTAssertEqual(GirlState.allCases.count, 5)
+        XCTAssertEqual(GirlState.allCases.count, 6)
     }
 
     func testSecretMode() {
