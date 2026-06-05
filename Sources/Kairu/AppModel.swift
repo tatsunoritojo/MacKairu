@@ -61,19 +61,29 @@ final class AppModel: ObservableObject {
     /// 「お前を消す方法」で消される最中（悲しくフェードアウト中）。
     @Published var girlDying = false
     private var girlImages: [GirlState: NSImage] = [:]
-    /// 表示すべき裏キャラ画像。
-    var girlCurrentImage: NSImage? { girlImages[girlDisplay] ?? girlImages[.idle] }
+    /// 表示すべき裏キャラ画像。未配置の状態はフォールバック連鎖で近い既存画像に代替する。
+    var girlCurrentImage: NSImage? {
+        for s in girlDisplay.imageChain {
+            if let img = girlImages[s] { return img }
+        }
+        return girlImages[.idle]
+    }
     var hasGirlImages: Bool { girlImages[.idle] != nil }
 
     private var patMonitorGlobal: Any?
     private var patMonitorLocal: Any?
     private var girlTimer: Timer?
     private var mouseHistory: [(p: NSPoint, t: Double)] = []
-    private var headHoverTime: Double = 0
-    private var cooldownUntil: Double = 0
-    private var endUntil: Double = 0
     private var lastTick: Double = 0
-    private var pamperFlip: Double = 0
+    /// 頭なで状態機械（純粋ロジックは KairuCore 側）。
+    private var pettingMachine = PettingMachine()
+    /// 掴み（左ボタン保持）の追跡。
+    private var isHeld = false
+    private var heldDuration: Double = 0
+    /// ウィンドウが最後に動いた時刻（systemUptime）。ドラッグ判定に使う。AppDelegate が更新。
+    var lastWindowMove: Double = 0
+    /// AppDelegate の didMoveNotification から呼ぶ。
+    func noteWindowMoved() { lastWindowMove = ProcessInfo.processInfo.systemUptime }
 
     /// 裏キャラ画像フォルダ。
     static var girlDir: URL {
@@ -221,13 +231,13 @@ final class AppModel: ObservableObject {
                               : "通常モードに戻すね。"))
     }
 
-    /// 裏キャラの画像（5枚: 待機/気づき/甘え/甘えループ/余韻）を取り込む。
-    /// ファイル名で状態に振り分ける（noticed/waiting/pampering/pampering2/afterglowing 等）。
+    /// 裏キャラの画像（最大12枚: 待機/遠待機2/駆け出し2/気づき/甘え2/掴み/ドラッグ/余韻/悲しみ）を取り込む。
+    /// ファイル名で状態に振り分ける（idle/rest/doze/run/run2/notice/pamper/pamperLoop/hold/drag/end/sad 等）。
     func importGirlImages() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.png, .jpeg, .image]
         panel.allowsMultipleSelection = true
-        panel.message = "裏キャラの画像（5枚）を選んでください。ファイル名で自動振り分けします。"
+        panel.message = "裏キャラの画像を選んでください（最大12枚）。ファイル名で自動振り分けします。"
         guard panel.runModal() == .OK else { return }
         let dir = Self.girlDir
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -247,9 +257,9 @@ final class AppModel: ObservableObject {
     // MARK: - 頭なでなで 状態機械（裏モード）
 
     private func resetGirlState() {
+        pettingMachine.reset()
         girlState = .idle
-        headHoverTime = 0
-        cooldownUntil = 0
+        girlDisplay = .idle
         mouseHistory = []
         lastTick = 0
         isBeingPatted = false
@@ -282,7 +292,7 @@ final class AppModel: ObservableObject {
         mouseHistory.append((NSEvent.mouseLocation, ProcessInfo.processInfo.systemUptime))
     }
 
-    /// 撫で状態の更新（仕様の状態機械）。
+    /// 撫で状態の更新。マウス・ウィンドウから入力を組み立て、遷移は PettingMachine に委譲する。
     private func tickGirl() {
         if girlDying { return } // 終了演出中は何もしない
         let now = ProcessInfo.processInfo.systemUptime
@@ -291,76 +301,61 @@ final class AppModel: ObservableObject {
         // 直近 0.4 秒の軌跡だけ残す。
         mouseHistory.removeAll { now - $0.t > 0.4 }
 
-        // なで反応 OFF / 泳ぎ中 / 画像なし は待機に戻す。
-        guard character == .girl, isNadeEnabled, hasGirlImages, !isSwimming, let window else {
-            if girlState != .idle && girlState != .end { setGirlState(.idle) }
-            return
-        }
+        let enabled = character == .girl && isNadeEnabled && hasGirlImages && !isSwimming && window != nil
 
-        let m = NSEvent.mouseLocation
-        // 速度（px/sec）。
+        var inZone = false
         var speed: CGFloat = 0
-        if let first = mouseHistory.first, mouseHistory.count >= 2 {
-            let span = now - first.t
-            if span > 0.01 { speed = hypot(m.x - first.p.x, m.y - first.p.y) / CGFloat(span) }
-        }
-        // 頭の当たり判定（横長楕円・頭頂〜前髪あたり）。
-        let f = window.frame
-        let hx = f.midX, hy = f.maxY - f.height * 0.20
-        let rx = f.width * 0.32, ry = f.height * 0.16
-        let nx = (m.x - hx) / rx, ny = (m.y - hy) / ry
-        let inZone = (nx * nx + ny * ny) <= 1
-        // 頭付近での左右の揺れ（撫でっぽさ）。
-        let xs = mouseHistory.map { $0.p.x }
-        let xWobble = (xs.max() ?? 0) - (xs.min() ?? 0)
-        let petLike = inZone && xWobble > 8 && xWobble < 140 && speed < 500
-
-        if cooldownUntil > now, girlState != .end {
-            setGirlState(.idle); headHoverTime = 0; return
-        }
-
-        switch girlState {
-        case .idle:
-            if inZone && speed < 400 {
-                headHoverTime += dt
-                if headHoverTime > 0.18 { setGirlState(.notice) }
-            } else { headHoverTime = 0 }
-        case .notice:
-            if !inZone { setGirlState(.idle); headHoverTime = 0 }
-            else if petLike || headHoverTime > 0.35 { setGirlState(.pamper); pamperFlip = 0 }
-            else { headHoverTime += dt }
-        case .pamper:
-            if !inZone || speed > 500 { endPamper(now) }
-            else { pamperFlip += dt; if pamperFlip > 0.25 { pamperFlip = 0; girlState = .pamperLoop } }
-        case .pamperLoop:
-            if !inZone || speed > 500 { endPamper(now) }
-            else {
-                // 甘え中は pamper ↔ pamperLoop の画像をゆっくり往復。
-                pamperFlip += dt
-                if pamperFlip > 0.5 {
-                    pamperFlip = 0
-                    girlDisplay = (girlDisplay == .pamperLoop) ? .pamper : .pamperLoop
-                }
+        var xWobble: CGFloat = 0
+        var distance: CGFloat = 0
+        var reportHeld = false
+        var dragging = false
+        if let window {
+            let m = NSEvent.mouseLocation
+            // 速度（px/sec）。
+            if let first = mouseHistory.first, mouseHistory.count >= 2 {
+                let span = now - first.t
+                if span > 0.01 { speed = hypot(m.x - first.p.x, m.y - first.p.y) / CGFloat(span) }
             }
-        case .end:
-            if now > endUntil { setGirlState(.idle) }
-        case .sad:
-            break // 演出専用。状態機械では遷移しない
+            let f = window.frame
+            // 頭の当たり判定（横長楕円・頭頂〜前髪あたり）。
+            let hx = f.midX, hy = f.maxY - f.height * 0.20
+            let rx = f.width * 0.32, ry = f.height * 0.16
+            let nx = (m.x - hx) / rx, ny = (m.y - hy) / ry
+            inZone = (nx * nx + ny * ny) <= 1
+            // 頭付近での左右の揺れ（撫でっぽさ）。
+            let xs = mouseHistory.map { $0.p.x }
+            xWobble = (xs.max() ?? 0) - (xs.min() ?? 0)
+            // キャラ中心からカーソルまでの距離（遠い待機の判定）。
+            distance = hypot(m.x - f.midX, m.y - f.midY)
+
+            // 掴み／ドラッグ検出（左ボタンの保持をポーリング）。
+            // チャットを開いている時は入力操作なので掴み扱いしない。
+            if character == .girl, hasGirlImages, !isChatOpen {
+                let buttonDown = (NSEvent.pressedMouseButtons & 0x1) != 0
+                let onChar = f.insetBy(dx: -8, dy: -8).contains(m)
+                if !isHeld {
+                    if buttonDown && onChar { isHeld = true; heldDuration = 0 }
+                } else if !buttonDown {
+                    isHeld = false; heldDuration = 0
+                }
+                if isHeld { heldDuration += dt }
+                dragging = isHeld && (now - lastWindowMove < 0.16)
+                // クリックでチャットを開く誤爆を避けるため、保持は少し溜めてから掴み表示。
+                // ドラッグ（移動）検出時は即座に表示する。
+                reportHeld = dragging || (isHeld && heldDuration > 0.12)
+            } else {
+                isHeld = false; heldDuration = 0
+            }
         }
-        isBeingPatted = (girlState == .pamper || girlState == .pamperLoop)
-    }
 
-    private func setGirlState(_ s: GirlState) {
-        girlState = s
-        girlDisplay = s
-        if s != .pamper && s != .pamperLoop { isBeingPatted = false }
-    }
+        pettingMachine.update(PettingMachine.Input(
+            dt: dt, inZone: inZone, speed: Double(speed),
+            xWobble: Double(xWobble), distance: Double(distance), enabled: enabled,
+            isHeld: reportHeld, isDragging: dragging, isMoving: isSwimming))
 
-    private func endPamper(_ now: Double) {
-        setGirlState(.end)
-        endUntil = now + 0.5
-        cooldownUntil = now + 1.5
-        isBeingPatted = false
+        girlState = pettingMachine.state
+        girlDisplay = pettingMachine.display
+        isBeingPatted = pettingMachine.isBeingPatted
     }
 
     // MARK: - 文脈の取り込み（クリップボード／スクショ）
@@ -579,6 +574,7 @@ final class AppModel: ObservableObject {
                 messages.append(ChatMessage(role: .assistant,
                     text: "え…わたしを、消すんですか…？\n……ばいばい。"))
                 stopPatTracking()
+                pettingMachine.enterSad()
                 girlDisplay = .sad
                 girlDying = true
                 DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { KairuQuit.now() }

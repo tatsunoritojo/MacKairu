@@ -235,7 +235,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.orderFrontRegardless()
     }
 
-    @objc private func windowMoved() { model.persistPosition() }
+    @objc private func windowMoved() {
+        model.noteWindowMoved() // ドラッグ判定用に最終移動時刻を記録
+        model.persistPosition()
+    }
 
     @objc private func openSettings() {
         if settingsWindow == nil {
