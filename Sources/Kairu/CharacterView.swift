@@ -92,18 +92,6 @@ struct CharacterView: View {
                         .foregroundStyle(.pink.opacity(0.7))
                 }
             }
-            // なでなで中はハートが舞う（終了演出中は出さない）。
-            if patted && !dying {
-                ForEach(0..<3, id: \.self) { i in
-                    let phase = t * 1.5 + Double(i) * 0.7
-                    let up = CGFloat((phase.truncatingRemainder(dividingBy: 1.0)))
-                    Text("💗")
-                        .font(.system(size: side * 0.16))
-                        .offset(x: CGFloat(sin(phase * 3)) * side * 0.18,
-                                y: -side * 0.30 - up * side * 0.35)
-                        .opacity(1.0 - up)
-                }
-            }
         }
         .frame(width: side, height: side)
     }
