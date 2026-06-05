@@ -328,6 +328,7 @@ final class AppModel: ObservableObject {
         girlTimer?.invalidate(); girlTimer = nil
         mouseHistory = []
         isHeld = false; didDrag = false
+        if appliedGirlCursor != nil { NSCursor.arrow.set(); appliedGirlCursor = nil }
     }
 
     private func recordMouse() {
@@ -351,6 +352,7 @@ final class AppModel: ObservableObject {
                 whirlScore = 0
                 lastWhirlPos = NSEvent.mouseLocation
                 lastWhirlAngle = nil
+                updateGirlCursor() // 掴んだ瞬間に closedHand へ
             }
         case .leftMouseDragged:
             guard isHeld else { return }
@@ -366,6 +368,7 @@ final class AppModel: ObservableObject {
                 if whirlScore > whirlThreshold { dizzyTimer = dizzyDuration; dizzyPhase = 0 }
                 whirlScore = 0; lastWhirlPos = nil; lastWhirlAngle = nil
             }
+            updateGirlCursor() // 離した瞬間に openHand へ
         default:
             break
         }
@@ -524,6 +527,24 @@ final class AppModel: ObservableObject {
             thinkingTimer = 0
             // 発見シーケンスが中断された場合は破棄。
             if discoverTimer > 0 { discoverTimer = 0; pendingApproach = false }
+        }
+
+        updateGirlCursor()
+    }
+
+    /// POIN に重なった時は openHand（掴める）、掴んでいる間は closedHand（掴んでる）。
+    /// 自分のウィンドウ上にいる時だけ変更し、他アプリのカーソルには触れない。
+    private var appliedGirlCursor: NSCursor?
+    private func updateGirlCursor() {
+        guard character == .girl, !isChatOpen, let window else {
+            if appliedGirlCursor != nil { NSCursor.arrow.set(); appliedGirlCursor = nil }
+            return
+        }
+        let over = window.frame.contains(NSEvent.mouseLocation)
+        let want: NSCursor? = isHeld ? .closedHand : (over ? .openHand : nil)
+        if want !== appliedGirlCursor {
+            (want ?? NSCursor.arrow).set()
+            appliedGirlCursor = want
         }
     }
 
