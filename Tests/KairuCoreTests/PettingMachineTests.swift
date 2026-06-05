@@ -26,15 +26,14 @@ final class PettingMachineTests: XCTestCase {
 
     func testFastCursorDoesNotNotice() {
         var m = PettingMachine()
-        for _ in 0..<10 { m.update(near(speed: 450)) } // noticeSpeedMax=400 超
+        // noticeSpeedMax=1200 超かつ撫で動作なし(wobble 0)なら気づかない。
+        for _ in 0..<10 { m.update(near(speed: 1500)) }
         XCTAssertEqual(m.state, .idle)
     }
 
-    func testNoticeToPamperByPetMotion() {
+    func testPetMotionFromIdleJumpsStraightToPamper() {
         var m = PettingMachine()
-        for _ in 0..<4 { m.update(near()) }
-        XCTAssertEqual(m.state, .notice)
-        // 撫で動作（ゆれ幅が範囲内）で即 pamper。
+        // 明確な撫で動作なら notice を飛ばして即 pamper（反応の速さ）。
         m.update(near(wobble: 40))
         XCTAssertEqual(m.state, .pamper)
         XCTAssertTrue(m.isBeingPatted)
@@ -42,16 +41,14 @@ final class PettingMachineTests: XCTestCase {
 
     func testNoticeToPamperByDwell() {
         var m = PettingMachine()
-        for _ in 0..<4 { m.update(near()) } // notice
-        // 撫で動作なしでも pamperHoverTime=0.35 滞在で pamper。
+        // 頭ゾーンに低速で滞在し続ければ、撫で動作なしでも甘える。
         for _ in 0..<8 { m.update(near()) }
-        XCTAssertEqual(m.state, .pamper)
+        XCTAssertTrue(m.isBeingPatted) // pamper か pamperLoop
     }
 
     func testPamperToLoopThenOscillates() {
         var m = PettingMachine()
-        for _ in 0..<4 { m.update(near()) }
-        m.update(near(wobble: 40)) // pamper
+        m.update(near(wobble: 40)) // 即 pamper
         // pamperFlipInterval=0.25 を超えると pamperLoop。
         for _ in 0..<6 { m.update(near(wobble: 40)) }
         XCTAssertEqual(m.state, .pamperLoop)
@@ -62,30 +59,37 @@ final class PettingMachineTests: XCTestCase {
         XCTAssertEqual(m.state, .pamperLoop) // 論理状態は維持
     }
 
-    func testLeavingZoneEntersEndThenCooldownIdle() {
+    func testBriefExitDoesNotEndPamper() {
         var m = PettingMachine()
-        for _ in 0..<4 { m.update(near()) }
         m.update(near(wobble: 40)) // pamper
-        m.update(away()) // ゾーン外 → end（余韻）
+        // 一瞬（猶予 0.35s 未満）ゾーン外に出ても撫では終わらない（ヒステリシス）。
+        for _ in 0..<5 { m.update(away()) } // 0.25s 離脱
+        XCTAssertTrue(m.isBeingPatted)
+        // 戻ればそのまま継続。
+        m.update(near(wobble: 40))
+        XCTAssertTrue(m.isBeingPatted)
+    }
+
+    func testSustainedExitEndsPamperAfterGrace() {
+        var m = PettingMachine()
+        m.update(near(wobble: 40)) // pamper
+        // 猶予 0.35s を超えて離れ続けると end（余韻）へ。
+        for _ in 0..<9 { m.update(away()) } // 0.45s 離脱
         XCTAssertEqual(m.state, .end)
         // endDuration=0.5 経過で idle に戻る。
         for _ in 0..<11 { m.update(away()) }
         XCTAssertEqual(m.state, .idle)
     }
 
-    func testCooldownBlocksImmediateRePet() {
+    func testCanRePetImmediatelyAfterRelease() {
         var m = PettingMachine()
-        for _ in 0..<4 { m.update(near()) }
-        m.update(near(wobble: 40))   // pamper
-        m.update(away())             // end 開始（cooldown=1.5 開始）
-        for _ in 0..<11 { m.update(away()) } // end 終了 → idle（cooldown 残 ~1.0）
-        // クールダウン中は頭ゾーンに入っても notice に上がれない。
-        for _ in 0..<4 { m.update(near()) }
-        XCTAssertEqual(m.state, .idle)
-        // クールダウンが切れれば再び notice 可能。
-        for _ in 0..<20 { m.update(away()) } // 残りクールダウン消化
-        for _ in 0..<4 { m.update(near()) }
-        XCTAssertEqual(m.state, .notice)
+        m.update(near(wobble: 40))            // pamper
+        for _ in 0..<9 { m.update(away()) }   // 猶予超で end へ
+        XCTAssertEqual(m.state, .end)
+        // 余韻中でも撫で直したら即復帰（撫でたい時に撫でられる）。
+        m.update(near(wobble: 40))
+        XCTAssertEqual(m.state, .pamper)
+        XCTAssertTrue(m.isBeingPatted)
     }
 
     func testDisabledReturnsToIdle() {

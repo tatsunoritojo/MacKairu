@@ -317,9 +317,9 @@ final class AppModel: ObservableObject {
                 if span > 0.01 { speed = hypot(m.x - first.p.x, m.y - first.p.y) / CGFloat(span) }
             }
             let f = window.frame
-            // 頭の当たり判定（横長楕円・頭頂〜前髪あたり）。
-            let hx = f.midX, hy = f.maxY - f.height * 0.20
-            let rx = f.width * 0.32, ry = f.height * 0.16
+            // 頭の当たり判定（横長楕円）。撫でやすいよう頭〜上半身を広めにカバー。
+            let hx = f.midX, hy = f.maxY - f.height * 0.22
+            let rx = f.width * 0.42, ry = f.height * 0.24
             let nx = (m.x - hx) / rx, ny = (m.y - hy) / ry
             inZone = (nx * nx + ny * ny) <= 1
             // 頭付近での左右の揺れ（撫でっぽさ）。
@@ -356,6 +356,20 @@ final class AppModel: ObservableObject {
         girlState = pettingMachine.state
         girlDisplay = pettingMachine.display
         isBeingPatted = pettingMachine.isBeingPatted
+
+        // チャットで解説している間（思考中・回答提示中）は解説ポーズを最優先で表示。
+        // 掴み／ドラッグ中だけは操作優先でそちらを尊重する。
+        if isExplaining, girlState != .hold, girlState != .drag {
+            girlDisplay = .teaching
+            isBeingPatted = false
+        }
+    }
+
+    /// チャットで解説している最中か（思考中、または回答を提示中）。
+    private var isExplaining: Bool {
+        guard character == .girl else { return false }
+        if isThinking { return true }
+        return isChatOpen && messages.last?.role == .assistant
     }
 
     // MARK: - 文脈の取り込み（クリップボード／スクショ）
