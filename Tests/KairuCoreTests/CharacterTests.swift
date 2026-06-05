@@ -38,6 +38,8 @@ final class CharacterTests: XCTestCase {
         XCTAssertEqual(GirlState.from(fileName: "hold"), .hold)
         XCTAssertEqual(GirlState.from(fileName: "grab"), .hold)
         XCTAssertEqual(GirlState.from(fileName: "drag"), .drag)
+        XCTAssertEqual(GirlState.from(fileName: "teaching"), .teaching)
+        XCTAssertEqual(GirlState.from(fileName: "tip"), .teaching)
         // 状態名そのままも通る
         XCTAssertEqual(GirlState.from(fileName: "idle"), .idle)
         XCTAssertEqual(GirlState.from(fileName: "pamperLoop"), .pamperLoop)
@@ -46,7 +48,7 @@ final class CharacterTests: XCTestCase {
 
     func testGirlStateFileName() {
         XCTAssertEqual(GirlState.idle.fileName, "idle.png")
-        XCTAssertEqual(GirlState.allCases.count, 12)
+        XCTAssertEqual(GirlState.allCases.count, 13)
     }
 
     func testImageChainFallsBackToIdle() {

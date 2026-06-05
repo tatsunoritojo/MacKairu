@@ -47,6 +47,7 @@ public enum GirlState: String, CaseIterable, Sendable {
     case pamperLoop  // えへ（甘え継続ループ）
     case hold        // わっ（掴まれて持ち上げられた・驚き）
     case drag        // えへへ（掴まれたまま運ばれている・うれしい）
+    case teaching    // ここがポイント！（チャットで解説している時）
     case end         // …もう終わり？（余韻）
     case sad         // 「お前を消す方法」で終了される時の悲しい顔（演出専用）
 
@@ -63,6 +64,7 @@ public enum GirlState: String, CaseIterable, Sendable {
         case .pamperLoop: return [.pamperLoop, .pamper, .idle]
         case .drag:       return [.drag, .hold, .pamper, .idle]
         case .hold:       return [.hold, .notice, .idle]
+        case .teaching:   return [.teaching, .notice, .idle]
         default:          return [self, .idle]
         }
     }
@@ -72,6 +74,7 @@ public enum GirlState: String, CaseIterable, Sendable {
         let n = name.lowercased()
         if n.contains("sad") { return .sad }
         if n.contains("afterglow") || n == "end" { return .end }
+        if n.contains("teach") || n.contains("tip") || n.contains("explain") { return .teaching }
         if n.contains("drag") { return .drag }
         if n.contains("hold") || n.contains("grab") || n.contains("lift") || n.contains("pick") { return .hold }
         if n.contains("run2") || n.contains("dash2") || n.contains("walk2") { return .run2 }

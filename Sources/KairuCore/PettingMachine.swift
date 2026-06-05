@@ -9,27 +9,30 @@ public struct PettingMachine: Sendable {
 
     /// 状態遷移の閾値。すべて名前付きにして調整・追加をしやすくする。
     public struct Config: Sendable {
-        /// idle→notice に必要な頭ゾーン滞在時間（秒）。
-        public var noticeHoverTime: Double = 0.18
+        /// idle→notice に必要な頭ゾーン滞在時間（秒）。短いほどすぐ気づく。
+        public var noticeHoverTime: Double = 0.06
         /// notice→pamper のフォールバック滞在時間（撫で動作が無くても甘える）。
-        public var pamperHoverTime: Double = 0.35
-        /// idle→notice を許す最大カーソル速度（px/s）。
-        public var noticeSpeedMax: Double = 400
-        /// pamper / pamperLoop から離脱する速度（px/s）。
-        public var releaseSpeed: Double = 500
-        /// 「撫でっぽい」と判定する左右ゆれ幅の下限・上限（px）。
-        public var petWobbleMin: Double = 8
-        public var petWobbleMax: Double = 140
-        /// 撫で判定で許す最大速度（px/s）。
-        public var petSpeedMax: Double = 500
+        public var pamperHoverTime: Double = 0.18
+        /// idle→notice を許す最大カーソル速度（px/s）。速く近づいても気づけるよう高め。
+        public var noticeSpeedMax: Double = 1200
+        /// pamper / pamperLoop から離脱する速度（px/s）。振り払い相当のみ離脱。
+        public var releaseSpeed: Double = 1600
+        /// 「撫でっぽい」と判定する左右ゆれ幅の下限・上限（px）。大きめのストロークも許容。
+        public var petWobbleMin: Double = 6
+        public var petWobbleMax: Double = 240
+        /// 撫で判定で許す最大速度（px/s）。撫では速いので高く取る。
+        public var petSpeedMax: Double = 1600
         /// pamper→pamperLoop に移るまでの時間（秒）。
         public var pamperFlipInterval: Double = 0.25
         /// 甘えループ中に pamper↔pamperLoop の画像を往復する間隔（秒）。
         public var loopFlipInterval: Double = 0.5
+        /// 離脱の猶予（秒）。ゾーン外/速度超過がこの秒数“継続”して初めて終了する（ヒステリシス）。
+        /// 撫で中の一瞬のはみ出しや速いストロークでは終わらせない。
+        public var releaseGrace: Double = 0.35
         /// 余韻（end「…もう終わり？」）の表示時間（秒）。
         public var endDuration: Double = 0.5
-        /// 余韻のあと再反応を抑えるクールダウン（秒）。
-        public var cooldown: Double = 1.5
+        /// 余韻のあと再反応を抑えるクールダウン（秒）。実質ゼロ（すぐ撫で直せる）。
+        public var cooldown: Double = 0.25
 
         /// この距離（px）より遠いと「眠そうな待機」(rest↔doze)へ。これ以内はきりっとした idle。
         public var restRadius: Double = 360
@@ -94,6 +97,8 @@ public struct PettingMachine: Sendable {
     private var endRemaining: Double = 0
     private var restPhase: Double = 0
     private var runPhase: Double = 0
+    /// 離脱猶予の残り（秒）。撫で中に良条件へ戻るとリセットされる。
+    private var releaseGraceRemaining: Double = 0
 
     public init(config: Config = Config()) {
         self.config = config
@@ -108,6 +113,7 @@ public struct PettingMachine: Sendable {
         cooldownRemaining = 0
         endRemaining = 0
         restPhase = 0
+        releaseGraceRemaining = 0
     }
 
     /// 終了演出（sad）へ固定する。状態機械はこれ以降遷移しない（呼び出し側が update を止める想定）。
@@ -173,7 +179,10 @@ public struct PettingMachine: Sendable {
 
         switch state {
         case .idle:
-            if input.inZone && input.speed < config.noticeSpeedMax {
+            if petLike {
+                // 明確な撫で動作なら notice を飛ばして即甘える。
+                beginPamper()
+            } else if input.inZone && input.speed < config.noticeSpeedMax {
                 headHoverTime += input.dt
                 if headHoverTime > config.noticeHoverTime { setState(.notice) }
             } else {
@@ -186,15 +195,13 @@ public struct PettingMachine: Sendable {
             if !input.inZone {
                 setState(.idle); headHoverTime = 0
             } else if petLike || headHoverTime > config.pamperHoverTime {
-                setState(.pamper); pamperFlip = 0
+                beginPamper()
             } else {
                 headHoverTime += input.dt
             }
 
         case .pamper:
-            if !input.inZone || input.speed > config.releaseSpeed {
-                endPamper()
-            } else {
+            if pamperContinues(input) {
                 pamperFlip += input.dt
                 if pamperFlip > config.pamperFlipInterval {
                     pamperFlip = 0
@@ -204,9 +211,7 @@ public struct PettingMachine: Sendable {
             }
 
         case .pamperLoop:
-            if !input.inZone || input.speed > config.releaseSpeed {
-                endPamper()
-            } else {
+            if pamperContinues(input) {
                 // 甘え中は pamper↔pamperLoop の画像をゆっくり往復。
                 pamperFlip += input.dt
                 if pamperFlip > config.loopFlipInterval {
@@ -216,14 +221,16 @@ public struct PettingMachine: Sendable {
             }
 
         case .end:
+            // 余韻中でも撫で直したら即復帰（取りこぼさない）。
+            if petLike { beginPamper(); break }
             endRemaining -= input.dt
             if endRemaining <= 0 { setState(.idle) }
 
         case .sad:
             break // 演出専用。状態機械では遷移しない。
 
-        case .run, .run2, .hold, .drag, .rest, .doze:
-            // run/hold/drag は上の優先分岐で扱う。rest/doze は表示専用で state には入らない。
+        case .run, .run2, .hold, .drag, .rest, .doze, .teaching:
+            // run/hold/drag は上の優先分岐で扱う。rest/doze/teaching は表示専用で state には入らない。
             // 万一ここへ来たら（保持/移動が解けた直後など）待機へ。
             setState(.idle)
         }
@@ -243,10 +250,34 @@ public struct PettingMachine: Sendable {
         display = p < config.restOpenDuration ? .rest : .doze
     }
 
+    /// 甘え開始（idle/notice/end のどこからでも）。離脱猶予を満タンにする。
+    private mutating func beginPamper() {
+        setState(.pamper)
+        pamperFlip = 0
+        headHoverTime = 0
+        releaseGraceRemaining = config.releaseGrace
+    }
+
+    /// 甘えを継続すべきか（離脱はヒステリシス付き判定）。
+    /// 良条件（ゾーン内かつ速度OK）なら猶予を満タンに戻し true（表示を進めてよい）。
+    /// 悪条件（ゾーン外 or 振り払い速度）が `releaseGrace` 秒“継続”したら終了して false。
+    /// 猶予中（一瞬のはみ出し）は撫で表示を保ったまま false（画像はそのまま待つ）。
+    private mutating func pamperContinues(_ input: Input) -> Bool {
+        let bad = !input.inZone || input.speed > config.releaseSpeed
+        if bad {
+            releaseGraceRemaining -= input.dt
+            if releaseGraceRemaining <= 0 { endPamper() }
+            return false
+        }
+        releaseGraceRemaining = config.releaseGrace
+        return true
+    }
+
     private mutating func endPamper() {
         setState(.end)
         endRemaining = config.endDuration
         cooldownRemaining = config.cooldown
+        releaseGraceRemaining = 0
     }
 
     private mutating func setState(_ s: GirlState) {
