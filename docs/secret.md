@@ -31,9 +31,21 @@
 
 <div align="center">
 
-<video src="https://github.com/tatsunoritojo/MacKairu/raw/main/docs/videos/girl-petting.mp4" controls muted loop width="380"></video>
+<!--
+  インライン再生を安定させるには src を GitHub の user-attachments URL にする:
+  README/Issue/PR の編集画面に docs/videos/girl-petting.mp4 をドラッグ&ドロップ →
+  生成される https://github.com/user-attachments/assets/xxxx... を下の src に差し替え。
+  raw/main/...mp4 はリンクとしては開けるがプレイヤーとしては不安定（GitHub 既知挙動）。
+-->
+<video
+  src="https://github.com/tatsunoritojo/MacKairu/raw/main/docs/videos/girl-petting.mp4"
+  poster="images/girl-petting-poster.png"
+  controls muted loop playsinline width="380">
+</video>
 
-▶ 再生されない場合は [こちら](videos/girl-petting.mp4)
+<br>
+
+<sub>再生されない場合は <a href="videos/girl-petting.mp4">こちら</a></sub>
 
 </div>
 
