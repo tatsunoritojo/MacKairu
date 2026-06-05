@@ -506,7 +506,8 @@ final class AppModel: ObservableObject {
         isBeingPatted = pettingMachine.isBeingPatted
 
         // 悲しい時は、撫でて慰めると泣き止む（一定時間の頭なでで復帰）。
-        if isSad {
+        // チャットを開いている間は当たり判定がパネル側にズレるので、復帰させない。
+        if isSad, !isChatOpen {
             if pettingMachine.isBeingPatted {
                 sadPetAccum += dt
                 if sadPetAccum >= sadComfortTime { recoverFromSad() }
@@ -531,7 +532,8 @@ final class AppModel: ObservableObject {
             sadPhase += dt
             girlDisplay = sadPhase.truncatingRemainder(dividingBy: upsetFlip * 2) < upsetFlip
                 ? .upset : .upset2
-            isBeingPatted = false
+            // 慰められている時だけ手応え（ふわっと反応）を残す。
+            isBeingPatted = !isChatOpen && pettingMachine.isBeingPatted
             girlFlip = false
         } else if discoverTimer > 0, !isHeld, !isChatOpen {
             // 移動直前の発見ポーズ。カーソル方向を向き、知覚できる間を置いてから走り出す。
@@ -663,6 +665,36 @@ final class AppModel: ObservableObject {
         isSad = true
         sadPetAccum = 0
         discoverTimer = 0; pendingApproach = false
+    }
+
+    /// 傷つける発話を1件登録する（悲しくなり、続けばロックへ）。
+    private func registerHurt() {
+        guard character == .girl, !poinLocked else { return }
+        hurtfulStreak += 1
+        enterSad()
+        if hurtfulStreak >= sadLockThreshold { lockPoin() }
+    }
+
+    /// キーワードで拾えなかった発話を、AI 自身に「傷つける内容か」を判定させる（非同期）。
+    private func judgeHurtfulByAI(_ text: String) {
+        guard let config, character == .girl, !poinLocked else { return }
+        var cfg = config
+        cfg.systemPrompt = """
+        あなたは短い分類器です。次のユーザー発話が、かわいい常駐キャラクターに対して
+        侮辱・罵倒・冷たく突き放す・存在を否定するなど「相手を傷つける」内容かを判定します。
+        単なる難しい要求・批判的でも丁寧な指摘・通常の質問は「傷つけない」に分類します。
+        出力は yes か no の1語のみ。
+        """
+        let client = AIClient(config: cfg)
+        let probe = [ChatMessage(role: .user, text: text)]
+        Task { [weak self] in
+            guard let reply = try? await client.send(history: probe) else { return }
+            let yes = reply.lowercased().contains("yes")
+            await MainActor.run {
+                guard let self, yes, self.character == .girl, !self.poinLocked else { return }
+                self.registerHurt()
+            }
+        }
     }
 
     /// 撫でて慰められて泣き止む。累計回数を増やす。
@@ -972,12 +1004,13 @@ final class AppModel: ObservableObject {
         messages.append(ChatMessage(role: .user, text: text, image: image))
         clearPending()
 
-        // 心無い言葉には、POIN が悲しい顔になる（返答はする）。
-        // 復帰させずに傷つけ続けると、やがてロックされる。
-        if character == .girl, HurtfulText.isHurtful(typed) {
-            hurtfulStreak += 1
-            enterSad()
-            if hurtfulStreak >= sadLockThreshold { lockPoin() }
+        // 心無い言葉の判定。明白な語はキーワードで即反応、外れたものは AI に判定させる。
+        if character == .girl, !poinLocked, !typed.isEmpty {
+            if HurtfulText.isHurtful(typed) {
+                registerHurt()
+            } else {
+                judgeHurtfulByAI(typed)
+            }
         }
 
         guard let config else {
