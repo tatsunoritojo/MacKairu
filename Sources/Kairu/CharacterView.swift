@@ -76,7 +76,10 @@ struct CharacterView: View {
         ZStack {
             if let img = girlImage {
                 Image(nsImage: img)
-                    .resizable().scaledToFit()
+                    .resizable()
+                    .interpolation(.high)      // 最高画質で補間
+                    .antialiased(true)
+                    .scaledToFit()
                     .scaleEffect((patted && !dying) ? 1.06 : 1.0)
                     .animation(.spring(response: 0.25, dampingFraction: 0.5), value: patted)
                     .offset(x: shakeX, y: shakeY)
