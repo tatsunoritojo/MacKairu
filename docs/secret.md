@@ -31,14 +31,10 @@
 
 <div align="center">
 
-<!--
-  インライン再生を安定させるには src を GitHub の user-attachments URL にする:
-  README/Issue/PR の編集画面に docs/videos/girl-petting.mp4 をドラッグ&ドロップ →
-  生成される https://github.com/user-attachments/assets/xxxx... を下の src に差し替え。
-  raw/main/...mp4 はリンクとしては開けるがプレイヤーとしては不安定（GitHub 既知挙動）。
--->
+<!-- インライン再生は GitHub の user-attachments URL を使用（raw/main は不安定なため）。
+     差し替え元: docs/videos/girl-petting.mp4 -->
 <video
-  src="https://github.com/tatsunoritojo/MacKairu/raw/main/docs/videos/girl-petting.mp4"
+  src="https://github.com/user-attachments/assets/bf7d41ab-3aa2-4839-a86e-b0ff11ebf64b"
   poster="images/girl-petting-poster.png"
   controls muted loop playsinline width="380">
 </video>
