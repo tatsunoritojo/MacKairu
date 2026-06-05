@@ -12,7 +12,7 @@ final class AppModel: ObservableObject {
     @Published var isChatOpen = false
     @Published var isThinking = false
     /// 吹き出しに出す一言（アイドル時のヒントやエラー表示）。
-    @Published var bubble: String? = "やあ！Mac のことなら何でも聞いてね 🐬"
+    @Published var bubble: String? = "やあ！Mac のことなら何でも聞いてね"
 
     /// 表示中のキャラクター。
     @Published var character: Character = .dolphin
@@ -78,7 +78,9 @@ final class AppModel: ObservableObject {
         }
         loadGirlImage()
         if config == nil || !(config?.hasKey ?? false) {
-            bubble = "最初に API キーを設定してね（メニューバーの🐬→「設定…」）"
+            bubble = "最初に API キーを設定してね（メニューバーの\(character.emoji)→「設定…」）"
+        } else {
+            bubble = "やあ！Mac のことなら何でも聞いてね \(character.emoji)"
         }
     }
 
@@ -108,9 +110,9 @@ final class AppModel: ObservableObject {
     func reloadConfig() {
         config = AppConfig.load()
         if config?.hasKey == true {
-            bubble = "準備OK！何でも聞いてね 🐬"
+            bubble = "準備OK！何でも聞いてね \(character.emoji)"
         } else {
-            bubble = "API キーがまだ未設定です（🐬→「設定…」から入力）"
+            bubble = "API キーがまだ未設定です（\(character.emoji)→「設定…」から入力）"
         }
     }
 
@@ -170,12 +172,13 @@ final class AppModel: ObservableObject {
         onCharacterChanged?(c)
         if c == .girl {
             startPatTracking()
-            if girlImage == nil {
-                bubble = "裏キャラの画像がまだないよ。設定 →「裏キャラ」で用意してね。"
-            }
+            bubble = girlImage == nil
+                ? "裏キャラの画像がまだないよ。設定 →「裏キャラ」で用意してね。"
+                : "…裏モード。頭、撫でてくれてもいいんだよ？"
         } else {
             stopPatTracking()
             isBeingPatted = false
+            bubble = "\(c.emoji) になったよ"
         }
         applyWindowSize(animated: true)
     }
@@ -527,7 +530,7 @@ final class AppModel: ObservableObject {
 
         guard let config else {
             messages.append(ChatMessage(role: .assistant,
-                text: "設定が読み込めません。🐬→「設定…」から API キーを入れてください。"))
+                text: "設定が読み込めません。\(character.emoji)→「設定…」から API キーを入れてください。"))
             return
         }
         isThinking = true
