@@ -34,11 +34,11 @@ public struct PettingMachine: Sendable {
         /// 余韻のあと再反応を抑えるクールダウン（秒）。実質ゼロ（すぐ撫で直せる）。
         public var cooldown: Double = 0.25
 
-        /// この距離（px）より遠いと「眠そうな待機」(rest↔doze)へ。これ以内はきりっとした idle。
+        /// この距離（px）より遠いと「探す待機」(search↔search2)へ。これ以内はきりっとした idle。
         public var restRadius: Double = 360
-        /// 眠そうな待機の開き目(rest)・とろけ目(doze)の表示時間（秒）。ゆっくり往復。
-        public var restOpenDuration: Double = 2.4
-        public var restDozeDuration: Double = 0.9
+        /// 探す待機 search↔search2 の表示時間（秒）。キョロキョロ見回す程度のテンポ。
+        public var restOpenDuration: Double = 1.1
+        public var restDozeDuration: Double = 1.0
         /// 駆け出し(run↔run2)の足の入れ替え間隔（秒）。小さいほど速く走って見える。
         public var runFlipInterval: Double = 0.16
 
@@ -230,7 +230,8 @@ public struct PettingMachine: Sendable {
             break // 演出専用。状態機械では遷移しない。
 
         case .run, .run2, .hold, .drag, .rest, .doze, .teaching, .teaching2,
-             .dizzy, .dizzy2, .thinking, .thinking2, .greet, .greet2, .greet3:
+             .dizzy, .dizzy2, .thinking, .thinking2, .greet, .greet2, .greet3,
+             .search, .search2, .found:
             // run/hold/drag は上の優先分岐で扱う。rest/doze/teaching は表示専用で state には入らない。
             // 万一ここへ来たら（保持/移動が解けた直後など）待機へ。
             setState(.idle)
@@ -238,7 +239,7 @@ public struct PettingMachine: Sendable {
     }
 
     /// idle 中の表示をカーソル距離で切り替える（論理状態は idle のまま）。
-    /// 近い: きりっとした待機(idle)。遠い: 開き目(rest)↔とろけ目(doze)をゆっくり往復。
+    /// 近い: きりっとした待機(idle)。遠い: キョロキョロとカーソルを探す(search↔search2)。
     private mutating func updateRestDisplay(_ input: Input) {
         guard input.distance > config.restRadius else {
             restPhase = 0
@@ -248,7 +249,7 @@ public struct PettingMachine: Sendable {
         restPhase += input.dt
         let cycle = config.restOpenDuration + config.restDozeDuration
         let p = cycle > 0 ? restPhase.truncatingRemainder(dividingBy: cycle) : 0
-        display = p < config.restOpenDuration ? .rest : .doze
+        display = p < config.restOpenDuration ? .search : .search2
     }
 
     /// 甘え開始（idle/notice/end のどこからでも）。離脱猶予を満タンにする。
