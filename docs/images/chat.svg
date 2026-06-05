@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 250" width="320" height="250" font-family="-apple-system, 'Hiragino Sans', sans-serif">
+  <defs>
+    <filter id="w" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000" flood-opacity="0.2"/>
+    </filter>
+  </defs>
+  <g filter="url(#w)">
+    <rect x="10" y="10" width="300" height="230" rx="18" fill="#f4f5f7" stroke="#dfe2e8"/>
+    <!-- header -->
+    <text x="26" y="36" font-size="14" font-weight="700" fill="#222">🐬 MacKairu</text>
+    <text x="252" y="35" font-size="13" fill="#9aa0a8">🗑  ⚙  ⏻  ⌄</text>
+    <line x1="10" y1="48" x2="310" y2="48" stroke="#e3e6ea"/>
+    <!-- user bubble -->
+    <rect x="150" y="64" width="148" height="30" rx="12" fill="#0a84ff"/>
+    <text x="224" y="84" font-size="13" fill="#fff" text-anchor="middle">お前を消す方法</text>
+    <!-- assistant bubble -->
+    <rect x="22" y="104" width="232" height="56" rx="12" fill="#e6e8ec"/>
+    <text x="34" y="124" font-size="12.5" fill="#222">「お前を消す方法」について</text>
+    <text x="34" y="142" font-size="12.5" fill="#222">調べました。</text>
+    <text x="34" y="156" font-size="12.5" fill="#888">……さようなら。</text>
+    <!-- input -->
+    <line x1="10" y1="196" x2="310" y2="196" stroke="#e3e6ea"/>
+    <rect x="24" y="206" width="248" height="26" rx="9" fill="#e9ebef"/>
+    <text x="34" y="223" font-size="12" fill="#9aa0a8">質問を入力…</text>
+    <circle cx="290" cy="219" r="12" fill="#c8ccd2"/>
+    <text x="290" y="224" font-size="14" fill="#fff" text-anchor="middle">↑</text>
+  </g>
+</svg>

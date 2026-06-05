@@ -1,0 +1,9 @@
+# SwiftPM
+.build/
+.swiftpm/
+
+# ビルド成果物（アプリバンドル）
+*.app/
+
+# macOS
+.DS_Store

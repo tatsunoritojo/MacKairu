@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 220" width="360" height="220" font-family="-apple-system, sans-serif">
+  <!-- 画面 -->
+  <rect x="8" y="8" width="344" height="204" rx="10" fill="#0e1726"/>
+  <rect x="8" y="8" width="344" height="22" rx="10" fill="#1b2942"/>
+  <circle cx="22" cy="19" r="3.5" fill="#ff5f57"/>
+  <circle cx="34" cy="19" r="3.5" fill="#febc2e"/>
+  <circle cx="46" cy="19" r="3.5" fill="#28c840"/>
+  <text x="176" y="23" font-size="10" fill="#7e8aa0" text-anchor="middle">あなたの画面</text>
+
+  <!-- 泳いだ軌跡 -->
+  <path d="M60,170 C120,60 200,190 300,70" fill="none" stroke="#4D9EEB" stroke-width="2" stroke-dasharray="5 6" opacity="0.7"/>
+
+  <!-- 小さいカイルたち（移動の連続） -->
+  <g opacity="0.35"><use href="#mini" x="55" y="164"/></g>
+  <g opacity="0.55"><use href="#mini" x="150" y="120"/></g>
+  <g opacity="0.8"><use href="#mini" x="295" y="64"/></g>
+
+  <defs>
+    <g id="mini" transform="scale(0.42)">
+      <path d="M0,30 C12,11 33,4 53,4 C68,4 80,14 82,26 C84,30 80,35 73,36 C66,40 60,42 53,44 C32,56 12,49 0,30 Z" fill="#4D9EEB"/>
+      <path d="M37,7 Q27,-3 27,-15 Q41,-3 49,6 Z" fill="#3880D1"/>
+      <circle cx="68" cy="22" r="3.5" fill="#111"/>
+    </g>
+  </defs>
+
+  <text x="176" y="205" font-size="10" fill="#9aa0a8" text-anchor="middle">7〜16秒ごとに、画面の端から端まで勝手に泳ぐ（大きいほど遠くへ）</text>
+</svg>
