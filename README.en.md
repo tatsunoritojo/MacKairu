@@ -15,7 +15,7 @@ A slightly clever, slightly annoying mascot that lives in the corner of your Mac
 ![Swift](https://img.shields.io/badge/Swift-6.3-orange?logo=swift&logoColor=white)
 ![Platform](https://img.shields.io/badge/macOS-14%2B-black?logo=apple)
 ![SwiftPM](https://img.shields.io/badge/SwiftPM-native-blue)
-![Tests](https://img.shields.io/badge/tests-56%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-57%20passing-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
 </div>
@@ -64,7 +64,7 @@ Native SwiftPM project. No extra runtime.
 ```sh
 git clone https://github.com/tatsunoritojo/MacKairu.git
 cd MacKairu
-swift test        # 56 tests
+swift test        # 57 tests
 ./build.sh        # builds Kairu.app
 open Kairu.app    # it moves in
 ```
@@ -77,7 +77,7 @@ Testable logic and UI are kept separate.
 
 ```
 Sources/
-  KairuCore/   pure logic (config, providers, characters) + 56 tests
+  KairuCore/   pure logic (config, providers, characters) + 57 tests
   Kairu/       UI (floating panel, vector drawing, state)
 Resources/     character image assets
 ```

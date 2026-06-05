@@ -106,6 +106,19 @@ final class AppModel: ObservableObject {
     private let dizzyDuration: Double = 2.6
     private let dizzyFlip: Double = 0.28         // dizzy↔dizzy2 の往復間隔
 
+    /// 悲しい（心無い言葉・エラー）残り時間と往復フェーズ。
+    private var upsetTimer: Double = 0
+    private let upsetDuration: Double = 3.6
+    private let upsetFlip: Double = 0.5
+
+    /// 自己モニタリング（過負荷）。メモリ計測・OSのメモリ圧迫・コンテキスト量で判定。
+    private var memPressureSrc: DispatchSourceMemoryPressure?
+    private var memWarning = false
+    private var memCritical = false
+    private var lastFootprintMB: Double = 0
+    private var footprintTick = 0
+    private var overloadPhase: Double = 0
+
     /// 裏キャラ画像フォルダ。
     static var girlDir: URL {
         FileManager.default.homeDirectoryForCurrentUser
@@ -475,6 +488,10 @@ final class AppModel: ObservableObject {
 
         girlFlip = false // 既定は反転なし（発見ポーズの時だけ向きを変える）
 
+        // 自己モニタリング: フットプリントを ~1.5 秒ごとにサンプリング。
+        footprintTick += 1
+        if footprintTick >= 30 { footprintTick = 0; lastFootprintMB = Self.appFootprintMB() }
+
         if discoverTimer > 0, !isHeld, !isChatOpen {
             // 移動直前の発見ポーズ。カーソル方向を向き、知覚できる間を置いてから走り出す。
             discoverTimer -= dt
@@ -498,6 +515,12 @@ final class AppModel: ObservableObject {
             let idx = Int((greetDuration - greetTimer) / 1.4) % 3
             girlDisplay = idx == 0 ? .greet : (idx == 1 ? .greet2 : .greet3)
             isBeingPatted = false
+        } else if upsetTimer > 0, !isHeld, !isThinking {
+            // 心無い言葉やエラーで悲しい（ぐすっ…／うぅ…をゆっくり往復）。
+            upsetTimer -= dt
+            girlDisplay = upsetTimer.truncatingRemainder(dividingBy: upsetFlip * 2) < upsetFlip
+                ? .upset : .upset2
+            isBeingPatted = false
         } else if isThinking, !isHeld {
             // AIが返答を考えている間（うーん…／むむ…をゆっくり往復）。
             thinkingTimer -= dt
@@ -520,11 +543,18 @@ final class AppModel: ObservableObject {
             }
             girlDisplay = teachingWinking ? .teaching2 : .teaching
             isBeingPatted = false
+        } else if isUnderLoad, girlState == .idle, !isHeld {
+            // 自己モニタリング（過負荷）: 大袈裟に ぐるぐる(build)→プシュー！(burst)。
+            overloadPhase += dt
+            let p = overloadPhase.truncatingRemainder(dividingBy: 1.6) // build 1.2s + burst 0.4s
+            girlDisplay = p < 1.2 ? .overload : .overload2
+            isBeingPatted = false
         } else {
             teachingWinking = false
             teachingTimer = Double.random(in: 1.8...3.6)
             thinkingAlt = false
             thinkingTimer = 0
+            overloadPhase = 0
             // 発見シーケンスが中断された場合は破棄。
             if discoverTimer > 0 { discoverTimer = 0; pendingApproach = false }
         }
@@ -546,6 +576,48 @@ final class AppModel: ObservableObject {
             (want ?? NSCursor.arrow).set()
             appliedGirlCursor = want
         }
+    }
+
+    // MARK: - 自己モニタリング（過負荷の自己検知）
+
+    /// OS のメモリ圧迫通知を購読する（1回だけ）。
+    private func startSelfMonitor() {
+        guard memPressureSrc == nil else { return }
+        let src = DispatchSource.makeMemoryPressureSource(
+            eventMask: [.normal, .warning, .critical], queue: .main)
+        src.setEventHandler { [weak self, weak src] in
+            guard let self, let ev = src?.data else { return }
+            self.memCritical = ev.contains(.critical)
+            self.memWarning = ev.contains(.warning) || self.memCritical
+        }
+        src.resume()
+        memPressureSrc = src
+    }
+
+    /// 自プロセスの物理メモリフットプリント（MB）。
+    private static func appFootprintMB() -> Double {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(
+            MemoryLayout<task_vm_info_data_t>.stride / MemoryLayout<integer_t>.stride)
+        let kr = withUnsafeMutablePointer(to: &info) { ptr in
+            ptr.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        return kr == KERN_SUCCESS ? Double(info.phys_footprint) / (1024 * 1024) : 0
+    }
+
+    /// 画像付きメッセージ数（キャッシュ圧迫の代理指標）。
+    private var imageMessageCount: Int { messages.reduce(0) { $0 + ($1.image != nil ? 1 : 0) } }
+
+    /// 高負荷（パニック寄り）か。
+    private var loadSevere: Bool {
+        memCritical || lastFootprintMB >= 1200 || messages.count >= 80 || imageMessageCount >= 10
+    }
+    /// 何らかの負荷がかかっているか（過負荷表現を出す閾値）。
+    private var isUnderLoad: Bool {
+        loadSevere || memWarning || lastFootprintMB >= 700
+            || messages.count >= 40 || imageMessageCount >= 5
     }
 
     private var teachingWinking = false
@@ -679,6 +751,7 @@ final class AppModel: ObservableObject {
     func startMischief() {
         scheduleSwim()
         scheduleChatter()
+        startSelfMonitor()
         if character == .girl { startPatTracking(); maybeGreet() }
     }
 
@@ -827,6 +900,9 @@ final class AppModel: ObservableObject {
         messages.append(ChatMessage(role: .user, text: text, image: image))
         clearPending()
 
+        // 心無い言葉には、POIN が悲しい顔になる（返答はする）。
+        if character == .girl, HurtfulText.isHurtful(typed) { upsetTimer = upsetDuration }
+
         guard let config else {
             messages.append(ChatMessage(role: .assistant,
                 text: "設定が読み込めません。\(character.emoji)→「設定…」から API キーを入れてください。"))
@@ -845,6 +921,8 @@ final class AppModel: ObservableObject {
             } catch {
                 let msg = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
                 self.messages.append(ChatMessage(role: .assistant, text: "⚠️ \(msg)"))
+                // 処理失敗・エラーでも悲しい顔になる。
+                if self.character == .girl { self.upsetTimer = self.upsetDuration }
             }
             self.isThinking = false
         }

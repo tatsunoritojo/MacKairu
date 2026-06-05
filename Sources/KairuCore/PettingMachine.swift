@@ -231,7 +231,7 @@ public struct PettingMachine: Sendable {
 
         case .run, .run2, .hold, .drag, .rest, .doze, .teaching, .teaching2,
              .dizzy, .dizzy2, .thinking, .thinking2, .greet, .greet2, .greet3,
-             .search, .search2, .found:
+             .search, .search2, .found, .upset, .upset2, .overload, .overload2:
             // run/hold/drag は上の優先分岐で扱う。rest/doze/teaching は表示専用で state には入らない。
             // 万一ここへ来たら（保持/移動が解けた直後など）待機へ。
             setState(.idle)

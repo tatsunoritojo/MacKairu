@@ -52,6 +52,10 @@ final class CharacterTests: XCTestCase {
         XCTAssertEqual(GirlState.from(fileName: "wondering"), .search)
         XCTAssertEqual(GirlState.from(fileName: "wondering2"), .search2)
         XCTAssertEqual(GirlState.from(fileName: "got_it"), .found)
+        XCTAssertEqual(GirlState.from(fileName: "upset"), .upset)
+        XCTAssertEqual(GirlState.from(fileName: "upset2"), .upset2)
+        XCTAssertEqual(GirlState.from(fileName: "overload"), .overload)
+        XCTAssertEqual(GirlState.from(fileName: "overload2"), .overload2)
         // 状態名そのままも通る
         XCTAssertEqual(GirlState.from(fileName: "idle"), .idle)
         XCTAssertEqual(GirlState.from(fileName: "pamperLoop"), .pamperLoop)
@@ -60,7 +64,7 @@ final class CharacterTests: XCTestCase {
 
     func testGirlStateFileName() {
         XCTAssertEqual(GirlState.idle.fileName, "idle.png")
-        XCTAssertEqual(GirlState.allCases.count, 24)
+        XCTAssertEqual(GirlState.allCases.count, 28)
     }
 
     func testImageChainFallsBackToIdle() {
@@ -69,6 +73,14 @@ final class CharacterTests: XCTestCase {
         XCTAssertEqual(GirlState.run2.imageChain, [.run2, .run, .idle])
         XCTAssertEqual(GirlState.drag.imageChain.last, .idle)
         XCTAssertEqual(GirlState.idle.imageChain, [.idle, .idle])
+    }
+
+    func testHurtfulText() {
+        XCTAssertTrue(HurtfulText.isHurtful("バカ"))
+        XCTAssertTrue(HurtfulText.isHurtful("もう うざい"))
+        XCTAssertTrue(HurtfulText.isHurtful("You are useless"))
+        XCTAssertFalse(HurtfulText.isHurtful("ありがとう、助かったよ"))
+        XCTAssertFalse(HurtfulText.isHurtful("スクショの撮り方は？"))
     }
 
     func testSecretMode() {
