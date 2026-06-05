@@ -103,7 +103,7 @@ MIT License © tatsunoritojo
 
 <br><br>
 
-<a href="docs/secret.md"><img src="docs/images/anim/nade.gif" width="96" alt="?"></a>
+<a href="docs/secret.md"><img src="docs/images/anim/run.gif" width="96" alt="?"></a>
 <br>
 <sub><a href="docs/secret.md">…?</a></sub>
 
