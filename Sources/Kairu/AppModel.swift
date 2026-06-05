@@ -252,25 +252,36 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// 画面内のランダムな位置へ、すーっと泳いで移動する（移動距離大きめ）。
+    /// すーっと泳いで移動する。約20%の確率でマウスカーソルの位置へ寄ってくる。
     private func swim() {
         guard isAnnoyEnabled, !isChatOpen, !isThinking,
               let window, let screen = window.screen ?? NSScreen.main else { return }
-        let v = screen.visibleFrame
         let size = window.frame.size
         let from = window.frame.origin
-
-        // 移動距離はイルカの大きさに比例（大きいほど遠くへ大きく泳ぐ）。
-        let reach = max(300, dolphinSide * 1.2)
-        let angle = Double.random(in: 0 ..< (2 * .pi))
-        let mag = CGFloat.random(in: reach * 0.4 ... reach)
-        let dx = CGFloat(cos(angle)) * mag
-        let dy = CGFloat(sin(angle)) * mag
-
-        // 中心座標で扱い、画面±margin に収める（大きいほど画面外まで遠征するが見失わない範囲）。
         let margin = dolphinSide * 0.5
-        var cx = from.x + size.width / 2 + dx
-        var cy = from.y + size.height / 2 + dy
+
+        // 20%: マウスカーソルの位置へ。80%: ランダムに大きく泳ぐ。
+        let goToCursor = Double.random(in: 0 ..< 1) < 0.2
+        let targetScreen: NSScreen
+        var cx: CGFloat
+        var cy: CGFloat
+        if goToCursor {
+            let mouse = NSEvent.mouseLocation // 画面座標（左下原点・frameと同じ系）
+            targetScreen = NSScreen.screens.first { $0.frame.contains(mouse) } ?? screen
+            cx = mouse.x
+            cy = mouse.y
+        } else {
+            targetScreen = screen
+            // 移動距離はイルカの大きさに比例（大きいほど遠くへ）。
+            let reach = max(300, dolphinSide * 1.2)
+            let angle = Double.random(in: 0 ..< (2 * .pi))
+            let mag = CGFloat.random(in: reach * 0.4 ... reach)
+            cx = from.x + size.width / 2 + CGFloat(cos(angle)) * mag
+            cy = from.y + size.height / 2 + CGFloat(sin(angle)) * mag
+        }
+
+        // 中心座標を画面±margin に収める（見失わない範囲で画面外まで遠征可）。
+        let v = targetScreen.visibleFrame
         cx = min(max(cx, v.minX - margin), v.maxX + margin)
         cy = min(max(cy, v.minY - margin), v.maxY + margin)
         let x = cx - size.width / 2
