@@ -24,6 +24,15 @@ final class AppModel: ObservableObject {
     /// イルカの大きさ倍率（0.6〜2.2）。ピンチやメニューで変更。
     @Published var dolphinScale: Double = 1.0
 
+    /// チャット欄のサイズ（リサイズ可能・永続化）。グリップのドラッグで変える。
+    @Published var chatWidth: CGFloat = 300
+    @Published var chatHeight: CGFloat = 380
+    /// リサイズ開始時のサイズ（ドラッグ中の基準）。
+    private var chatResizeStart: NSSize?
+    /// チャット欄サイズの可動域。
+    static let chatMinSize = NSSize(width: 280, height: 300)
+    static let chatMaxSize = NSSize(width: 720, height: 820)
+
     /// 取り込み中の文脈（クリップボードのテキスト）。
     @Published var pendingText: String?
     /// 取り込み中の画像（スクショ等）。
@@ -61,6 +70,8 @@ final class AppModel: ObservableObject {
     private let originXKey = "windowOriginX"
     private let originYKey = "windowOriginY"
     private let characterKey = "character"
+    private let chatWidthKey = "chatWidth"
+    private let chatHeightKey = "chatHeight"
 
     /// 裏キャラ（女の子）の論理状態と表示状態。
     @Published var girlState: GirlState = .idle
@@ -106,6 +117,35 @@ final class AppModel: ObservableObject {
     private let dizzyDuration: Double = 2.6
     private let dizzyFlip: Double = 0.28         // dizzy↔dizzy2 の往復間隔
 
+    /// 悲しい状態（心無い言葉・エラー）。撫でて慰めるまで持続し、全表示に優先する。
+    @Published var isSad = false
+    private var sadPhase: Double = 0
+    private let upsetFlip: Double = 0.5
+    private var sadPetAccum: Double = 0          // 撫でて慰めた累積時間
+    private let sadComfortTime: Double = 0.9     // これだけ撫でると泣き止む
+    private var hurtfulStreak = 0                // 復帰させずに傷つけ続けた回数
+    private let sadLockThreshold = 15            // これを超えると POIN をロック
+    private var hurtRegisteredForSend = false    // 同一送信での二重カウント防止
+
+    /// POIN を泣き止ませた累計回数（それを目的に遊ぶ人向けの計測）。
+    private(set) var poinRecoverCount: Int {
+        get { UserDefaults.standard.integer(forKey: "poinRecoverCount") }
+        set { UserDefaults.standard.set(newValue, forKey: "poinRecoverCount") }
+    }
+    /// POIN がロックされているか（イルカたちしか使えない）。
+    var poinLocked: Bool {
+        get { UserDefaults.standard.bool(forKey: "poinLocked") }
+        set { UserDefaults.standard.set(newValue, forKey: "poinLocked") }
+    }
+
+    /// 自己モニタリング（過負荷）。メモリ計測・OSのメモリ圧迫・コンテキスト量で判定。
+    private var memPressureSrc: DispatchSourceMemoryPressure?
+    private var memWarning = false
+    private var memCritical = false
+    private var lastFootprintMB: Double = 0
+    private var footprintTick = 0
+    private var overloadPhase: Double = 0
+
     /// 裏キャラ画像フォルダ。
     static var girlDir: URL {
         FileManager.default.homeDirectoryForCurrentUser
@@ -122,9 +162,17 @@ final class AppModel: ObservableObject {
         self.config = AppConfig.load()
         let saved = UserDefaults.standard.double(forKey: scaleKey)
         if saved > 0 { dolphinScale = min(10.0, max(0.6, saved)) }
+        let cw = UserDefaults.standard.double(forKey: chatWidthKey)
+        let ch = UserDefaults.standard.double(forKey: chatHeightKey)
+        if cw > 0 { chatWidth = min(Self.chatMaxSize.width, max(Self.chatMinSize.width, cw)) }
+        if ch > 0 { chatHeight = min(Self.chatMaxSize.height, max(Self.chatMinSize.height, ch)) }
         if let raw = UserDefaults.standard.string(forKey: characterKey),
            let c = Character(rawValue: raw) {
             character = c
+        }
+        // ロック中に POIN で保存されていたらイルカに戻す（イルカたちしか使えない）。
+        if character == .girl, UserDefaults.standard.bool(forKey: "poinLocked") {
+            character = .dolphin
         }
         loadGirlImages()
         if config == nil || !(config?.hasKey ?? false) {
@@ -169,7 +217,10 @@ final class AppModel: ObservableObject {
     }
 
     var openSize: NSSize {
-        NSSize(width: max(324, dolphinSide + 24), height: 380 + 8 + dolphinSide + 24 + 16)
+        // チャット欄（可変）＋キャラの大きさの両方を収めるウィンドウサイズ。
+        // 横: チャット幅とキャラ幅の大きい方＋左右パディング。縦: チャット＋間隔＋キャラ＋余白。
+        NSSize(width: max(chatWidth + 24, dolphinSide + 24),
+               height: chatHeight + 8 + dolphinSide + 24 + 16)
     }
 
     var currentTargetSize: NSSize { isChatOpen ? openSize : closedSize }
@@ -197,9 +248,17 @@ final class AppModel: ObservableObject {
         guard let window else { return }
         let target = currentTargetSize
         let old = window.frame
-        let newFrame = NSRect(
-            x: old.maxX - target.width, y: old.minY,
-            width: target.width, height: target.height)
+        // 右下を基準に成長（maxX・minY を固定）。
+        var x = old.maxX - target.width
+        var y = old.minY
+        // 画面サイズ・キャラの大きさに合わせて動的調整: はみ出すなら画面内へ寄せる。
+        // チャットを開いた時や大きいキャラの時に、欄が画面外に出て見切れるのを防ぐ。
+        if let screen = window.screen ?? NSScreen.main {
+            let v = screen.visibleFrame
+            if target.width <= v.width { x = min(max(x, v.minX), v.maxX - target.width) }
+            if target.height <= v.height { y = min(max(y, v.minY), v.maxY - target.height) }
+        }
+        let newFrame = NSRect(x: x, y: y, width: target.width, height: target.height)
         window.setFrame(newFrame, display: true, animate: animated)
         saveOrigin()
     }
@@ -225,6 +284,31 @@ final class AppModel: ObservableObject {
         saveOrigin()
     }
 
+    // MARK: - チャット欄のリサイズ（グリップのドラッグ）
+
+    /// リサイズ開始（基準サイズを記録）。
+    func chatResizeBegan() {
+        if chatResizeStart == nil {
+            chatResizeStart = NSSize(width: chatWidth, height: chatHeight)
+        }
+    }
+
+    /// ドラッグ量からチャット欄サイズを更新する（基準サイズ＋累積移動）。
+    func chatResizeChanged(dx: CGFloat, dy: CGFloat) {
+        let base = chatResizeStart ?? NSSize(width: chatWidth, height: chatHeight)
+        chatWidth = min(Self.chatMaxSize.width, max(Self.chatMinSize.width, base.width + dx))
+        chatHeight = min(Self.chatMaxSize.height, max(Self.chatMinSize.height, base.height + dy))
+        applyWindowSize(animated: false)
+    }
+
+    /// リサイズ確定（サイズを永続化）。
+    func chatResizeEnded() {
+        chatResizeStart = nil
+        UserDefaults.standard.set(chatWidth, forKey: chatWidthKey)
+        UserDefaults.standard.set(chatHeight, forKey: chatHeightKey)
+        saveOrigin()
+    }
+
     /// 履歴をクリアしてスリムに戻す。
     func clearChat() {
         messages = []
@@ -244,7 +328,7 @@ final class AppModel: ObservableObject {
             startPatTracking()
             maybeGreet() // 初めて POIN が現れた時だけ挨拶
             bubble = hasGirlImages
-                ? "…裏モード。頭、撫でてくれてもいいんだよ？"
+                ? "…ぼくのこと、呼んだ？頭、撫でてくれてもいいんだよ？"
                 : "裏キャラの画像がまだないよ。設定 →「裏キャラ」で取り込んでね。"
         } else {
             stopPatTracking()
@@ -256,10 +340,15 @@ final class AppModel: ObservableObject {
     /// チャットの「裏モード」呪文でトグル。
     private func toggleSecretMode() {
         let goingSecret = character != .girl
+        if goingSecret, poinLocked {
+            // ロック中は POIN を呼べない。イルカたちしか使えない。
+            messages.append(ChatMessage(role: .assistant, text: "……POIN は、まだ拗ねてるみたい。"))
+            return
+        }
         setCharacter(goingSecret ? .girl : .dolphin)
         messages.append(ChatMessage(role: .assistant,
-            text: goingSecret ? "…裏モード。頭、撫でてくれてもいいんだよ？"
-                              : "通常モードに戻すね。"))
+            text: goingSecret ? "…ぼくのこと、呼んだ？頭、撫でてくれてもいいんだよ？"
+                              : "またね。呼んだら来るね。"))
     }
 
     /// 裏キャラの画像（最大12枚: 待機/遠待機2/駆け出し2/気づき/甘え2/掴み/ドラッグ/余韻/悲しみ）を取り込む。
@@ -328,6 +417,7 @@ final class AppModel: ObservableObject {
         girlTimer?.invalidate(); girlTimer = nil
         mouseHistory = []
         isHeld = false; didDrag = false
+        if appliedGirlCursor != nil { NSCursor.arrow.set(); appliedGirlCursor = nil }
     }
 
     private func recordMouse() {
@@ -351,6 +441,7 @@ final class AppModel: ObservableObject {
                 whirlScore = 0
                 lastWhirlPos = NSEvent.mouseLocation
                 lastWhirlAngle = nil
+                updateGirlCursor() // 掴んだ瞬間に closedHand へ
             }
         case .leftMouseDragged:
             guard isHeld else { return }
@@ -366,6 +457,7 @@ final class AppModel: ObservableObject {
                 if whirlScore > whirlThreshold { dizzyTimer = dizzyDuration; dizzyPhase = 0 }
                 whirlScore = 0; lastWhirlPos = nil; lastWhirlAngle = nil
             }
+            updateGirlCursor() // 離した瞬間に openHand へ
         default:
             break
         }
@@ -465,6 +557,17 @@ final class AppModel: ObservableObject {
         girlDisplay = pettingMachine.display
         isBeingPatted = pettingMachine.isBeingPatted
 
+        // 悲しい時は、撫でて慰めると泣き止む（一定時間の頭なでで復帰）。
+        // チャットを開いている間は当たり判定がパネル側にズレるので、復帰させない。
+        if isSad, !isChatOpen {
+            if pettingMachine.isBeingPatted {
+                sadPetAccum += dt
+                if sadPetAccum >= sadComfortTime { recoverFromSad() }
+            } else {
+                sadPetAccum = max(0, sadPetAccum - dt * 0.5)
+            }
+        }
+
         // 振り回しの累積は穏やかだと少しずつ冷める。
         if !isHeld && whirlScore > 0 {
             whirlScore = max(0, whirlScore - dt * whirlDecayPerSec)
@@ -472,7 +575,19 @@ final class AppModel: ObservableObject {
 
         girlFlip = false // 既定は反転なし（発見ポーズの時だけ向きを変える）
 
-        if discoverTimer > 0, !isHeld, !isChatOpen {
+        // 自己モニタリング: フットプリントを ~1.5 秒ごとにサンプリング。
+        footprintTick += 1
+        if footprintTick >= 30 { footprintTick = 0; lastFootprintMB = Self.appFootprintMB() }
+
+        if isSad {
+            // 悲しいは全てに優先し、撫でて慰められるまで常に悲しむ。
+            sadPhase += dt
+            girlDisplay = sadPhase.truncatingRemainder(dividingBy: upsetFlip * 2) < upsetFlip
+                ? .upset : .upset2
+            // 慰められている時だけ手応え（ふわっと反応）を残す。
+            isBeingPatted = !isChatOpen && pettingMachine.isBeingPatted
+            girlFlip = false
+        } else if discoverTimer > 0, !isHeld, !isChatOpen {
             // 移動直前の発見ポーズ。カーソル方向を向き、知覚できる間を置いてから走り出す。
             discoverTimer -= dt
             girlDisplay = .found
@@ -517,14 +632,132 @@ final class AppModel: ObservableObject {
             }
             girlDisplay = teachingWinking ? .teaching2 : .teaching
             isBeingPatted = false
+        } else if isUnderLoad, girlState == .idle, !isHeld {
+            // 自己モニタリング（過負荷）: 大袈裟に ぐるぐる(build)→プシュー！(burst)。
+            overloadPhase += dt
+            let p = overloadPhase.truncatingRemainder(dividingBy: 1.6) // build 1.2s + burst 0.4s
+            girlDisplay = p < 1.2 ? .overload : .overload2
+            isBeingPatted = false
         } else {
             teachingWinking = false
             teachingTimer = Double.random(in: 1.8...3.6)
             thinkingAlt = false
             thinkingTimer = 0
+            overloadPhase = 0
             // 発見シーケンスが中断された場合は破棄。
             if discoverTimer > 0 { discoverTimer = 0; pendingApproach = false }
         }
+
+        updateGirlCursor()
+    }
+
+    /// POIN に重なった時は openHand（掴める）、掴んでいる間は closedHand（掴んでる）。
+    /// 自分のウィンドウ上にいる時だけ変更し、他アプリのカーソルには触れない。
+    private var appliedGirlCursor: NSCursor?
+    private func updateGirlCursor() {
+        guard character == .girl, !isChatOpen, let window else {
+            if appliedGirlCursor != nil { NSCursor.arrow.set(); appliedGirlCursor = nil }
+            return
+        }
+        let over = window.frame.contains(NSEvent.mouseLocation)
+        let want: NSCursor? = isHeld ? .closedHand : (over ? .openHand : nil)
+        if want !== appliedGirlCursor {
+            (want ?? NSCursor.arrow).set()
+            appliedGirlCursor = want
+        }
+    }
+
+    // MARK: - 自己モニタリング（過負荷の自己検知）
+
+    /// OS のメモリ圧迫通知を購読する（1回だけ）。
+    private func startSelfMonitor() {
+        guard memPressureSrc == nil else { return }
+        let src = DispatchSource.makeMemoryPressureSource(
+            eventMask: [.normal, .warning, .critical], queue: .main)
+        src.setEventHandler { [weak self, weak src] in
+            guard let self, let ev = src?.data else { return }
+            self.memCritical = ev.contains(.critical)
+            self.memWarning = ev.contains(.warning) || self.memCritical
+        }
+        src.resume()
+        memPressureSrc = src
+    }
+
+    /// 自プロセスの物理メモリフットプリント（MB）。
+    private static func appFootprintMB() -> Double {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(
+            MemoryLayout<task_vm_info_data_t>.stride / MemoryLayout<integer_t>.stride)
+        let kr = withUnsafeMutablePointer(to: &info) { ptr in
+            ptr.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        return kr == KERN_SUCCESS ? Double(info.phys_footprint) / (1024 * 1024) : 0
+    }
+
+    /// 画像付きメッセージ数（キャッシュ圧迫の代理指標）。
+    private var imageMessageCount: Int { messages.reduce(0) { $0 + ($1.image != nil ? 1 : 0) } }
+
+    /// 高負荷（パニック寄り）か。
+    private var loadSevere: Bool {
+        memCritical || lastFootprintMB >= 1200 || messages.count >= 80 || imageMessageCount >= 10
+    }
+    /// 何らかの負荷がかかっているか（過負荷表現を出す閾値）。
+    private var isUnderLoad: Bool {
+        loadSevere || memWarning || lastFootprintMB >= 700
+            || messages.count >= 40 || imageMessageCount >= 5
+    }
+
+    // MARK: - 悲しい / 復帰 / ロック
+
+    /// 悲しい状態に入る（心無い言葉・エラー）。移動や発見シーケンスは止める。
+    private func enterSad() {
+        guard character == .girl, !poinLocked else { return }
+        isSad = true
+        sadPetAccum = 0
+        discoverTimer = 0; pendingApproach = false
+    }
+
+    /// 傷つける発話を1件登録する（悲しくなり、続けばロックへ）。
+    private func registerHurt() {
+        guard character == .girl, !poinLocked else { return }
+        hurtfulStreak += 1
+        enterSad()
+        if hurtfulStreak >= sadLockThreshold { lockPoin() }
+    }
+
+    /// POIN の返答末尾の気分タグ [[mood:...]] を取り除く（表示用）。
+    private static func stripMoodTags(_ text: String) -> String {
+        text.replacingOccurrences(of: #"\[\[mood:[a-zA-Z]+\]\]"#,
+                                  with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// 撫でて慰められて泣き止む。累計回数を増やす。
+    private func recoverFromSad() {
+        guard isSad else { return }
+        isSad = false
+        hurtfulStreak = 0
+        sadPetAccum = 0
+        poinRecoverCount += 1
+        bubble = "ぐすっ…ありがとう。"
+    }
+
+    /// 悲しいまま傷つけ続けられ、POIN がロックされる。以後はイルカたちしか使えない。
+    private func lockPoin() {
+        poinLocked = true
+        isSad = false
+        hurtfulStreak = 0
+        messages.append(ChatMessage(role: .assistant,
+            text: "……もう、いやだ。\nぼく、しばらく出てこないね。"))
+        setCharacter(.dolphin)
+    }
+
+    /// POIN のロックを解除する（設定から呼び戻す）。
+    func unlockPoin() {
+        poinLocked = false
+        hurtfulStreak = 0
     }
 
     private var teachingWinking = false
@@ -658,6 +891,7 @@ final class AppModel: ObservableObject {
     func startMischief() {
         scheduleSwim()
         scheduleChatter()
+        startSelfMonitor()
         if character == .girl { startPatTracking(); maybeGreet() }
     }
 
@@ -674,7 +908,8 @@ final class AppModel: ObservableObject {
         guard isAnnoyEnabled, !isChatOpen, !isThinking, let window else { return }
         if isSwimming || discoverTimer > 0 { return }
         if character == .girl {
-            if girlState != .idle || girlDying { return }
+            // 悲しい時は動かず、その場で悲しむ。
+            if girlState != .idle || girlDying || isSad { return }
             // カーソルを見つける発見モーションを挟む。マウスが自分より右なら反転して向く。
             approachFlip = NSEvent.mouseLocation.x > window.frame.midX
             discoverTimer = Double.random(in: 0.6...1.0) // 知覚できる発見の間
@@ -806,6 +1041,14 @@ final class AppModel: ObservableObject {
         messages.append(ChatMessage(role: .user, text: text, image: image))
         clearPending()
 
+        // 心無い言葉の判定。明白な語はキーワードで即反応（遅延ゼロ）。
+        // 微妙な冷たさは、POIN 自身の返答に付く気分タグ（後述）で拾う。
+        hurtRegisteredForSend = false
+        if character == .girl, !poinLocked, HurtfulText.isHurtful(typed) {
+            registerHurt()
+            hurtRegisteredForSend = true
+        }
+
         guard let config else {
             messages.append(ChatMessage(role: .assistant,
                 text: "設定が読み込めません。\(character.emoji)→「設定…」から API キーを入れてください。"))
@@ -819,11 +1062,21 @@ final class AppModel: ObservableObject {
         let history = messages
         Task {
             do {
-                let reply = try await client.send(history: history)
+                var reply = try await client.send(history: history)
+                // 裏モードは返答末尾の気分タグを読み取り、表示からは消す。
+                var hurt = false
+                if self.character == .girl {
+                    hurt = reply.contains("[[mood:hurt]]")
+                    reply = Self.stripMoodTags(reply)
+                }
                 self.messages.append(ChatMessage(role: .assistant, text: reply))
+                // POIN 自身が「傷ついた」と示したら悲しくなる（キーワード未検知時のみ）。
+                if hurt, !self.hurtRegisteredForSend { self.registerHurt() }
             } catch {
                 let msg = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
                 self.messages.append(ChatMessage(role: .assistant, text: "⚠️ \(msg)"))
+                // 処理失敗・エラーでも悲しい顔になる（撫でて慰めると戻る）。
+                self.enterSad()
             }
             self.isThinking = false
         }

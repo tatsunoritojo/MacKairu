@@ -59,6 +59,10 @@ public enum GirlState: String, CaseIterable, Sendable {
     case greet       // やっほー！（初回起動の挨拶1）
     case greet2      // こんにちはー！（初回起動の挨拶2）
     case greet3      // よろしくねー！（初回起動の挨拶3）
+    case upset       // ぐすっ…（心無い言葉やエラーで悲しい1）
+    case upset2      // うぅ…（悲しい2）
+    case overload    // ふぅ…（自己モニタリング: 負荷が重い・処理中）
+    case overload2   // ぱんく！（自己モニタリング: 高負荷でパニック）
     case end         // …もう終わり？（余韻）
     case sad         // 「お前を消す方法」で終了される時の悲しい顔（演出専用）
 
@@ -106,6 +110,10 @@ public enum GirlState: String, CaseIterable, Sendable {
         case .search:     return [.search, .idle]
         case .search2:    return [.search2, .search, .idle]
         case .found:      return [.found, .notice, .idle]
+        case .upset:      return [.upset, .sad, .idle]
+        case .upset2:     return [.upset2, .upset, .sad, .idle]
+        case .overload:   return [.overload, .overload2, .idle]
+        case .overload2:  return [.overload2, .overload, .idle]
         case .greet2:     return [.greet2, .greet, .idle]
         case .greet3:     return [.greet3, .greet, .idle]
         default:          return [self, .idle]
@@ -129,6 +137,10 @@ public enum GirlState: String, CaseIterable, Sendable {
         if n.contains("wondering2") || n.contains("search2") || n.contains("look2") { return .search2 }
         if n.contains("wondering") || n.contains("search") || n.contains("look") { return .search }
         if n.contains("got_it") || n.contains("gotit") || n.contains("found") { return .found }
+        if n.contains("upset2") || n.contains("cry2") || n.contains("sad2") { return .upset2 }
+        if n.contains("upset") || n.contains("cry") || n.contains("teary") { return .upset }
+        if n.contains("overload2") || n.contains("panic") { return .overload2 }
+        if n.contains("overload") || n.contains("heavy") || n.contains("overheat") { return .overload }
         if n.contains("drag") { return .drag }
         if n.contains("hold") || n.contains("grab") || n.contains("lift") || n.contains("pick") { return .hold }
         if n.contains("run2") || n.contains("dash2") || n.contains("walk2") { return .run2 }
@@ -143,13 +155,32 @@ public enum GirlState: String, CaseIterable, Sendable {
     }
 }
 
-/// 裏モードの呪文判定（チャットに打つと切り替わる）。
+/// 心無い言葉の判定（POIN を悲しませる）。誤検知を避けて控えめな語彙のみ。
+public enum HurtfulText {
+    private static let words = [
+        "死ね", "しね", "氏ね", "消えろ", "きえろ", "うざい", "ウザい", "うっとうしい",
+        "きもい", "キモい", "気持ち悪い", "ばか", "バカ", "馬鹿", "あほ", "アホ",
+        "ブス", "ぶす", "クズ", "くず", "ゴミ", "無能", "黙れ", "だまれ", "うるさい",
+        "嫌い", "きらい", "むかつく", "ムカつく",
+        "stupid", "idiot", "ugly", "useless", "shut up", "i hate you", "dumb",
+    ]
+    public static func isHurtful(_ text: String) -> Bool {
+        let t = text.lowercased()
+        return words.contains { t.contains($0.lowercased()) }
+    }
+}
+
+/// POIN 呼び出しの呪文判定（チャットに打つと切り替わる）。
+/// 「POIN」で召喚。旧「裏モード」も後方互換で残す。
 public enum SecretMode {
     public static func isTriggered(by text: String) -> Bool {
         let t = text.replacingOccurrences(of: " ", with: "")
             .replacingOccurrences(of: "　", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let spells = ["裏モード", "うらもーど", "裏もーど"]
-        return spells.contains { t.contains($0) }
+            .lowercased()
+        // 短い英単語の誤爆（point 等）を避けるため、英字呪文は完全一致で判定。
+        let exact = ["poin", "ぽいん", "ポイン"]
+        let legacy = ["裏モード", "うらもーど", "裏もーど"]
+        return exact.contains(t) || legacy.contains { t.contains($0) }
     }
 }

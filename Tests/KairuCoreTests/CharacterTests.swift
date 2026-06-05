@@ -52,6 +52,10 @@ final class CharacterTests: XCTestCase {
         XCTAssertEqual(GirlState.from(fileName: "wondering"), .search)
         XCTAssertEqual(GirlState.from(fileName: "wondering2"), .search2)
         XCTAssertEqual(GirlState.from(fileName: "got_it"), .found)
+        XCTAssertEqual(GirlState.from(fileName: "upset"), .upset)
+        XCTAssertEqual(GirlState.from(fileName: "upset2"), .upset2)
+        XCTAssertEqual(GirlState.from(fileName: "overload"), .overload)
+        XCTAssertEqual(GirlState.from(fileName: "overload2"), .overload2)
         // 状態名そのままも通る
         XCTAssertEqual(GirlState.from(fileName: "idle"), .idle)
         XCTAssertEqual(GirlState.from(fileName: "pamperLoop"), .pamperLoop)
@@ -60,7 +64,7 @@ final class CharacterTests: XCTestCase {
 
     func testGirlStateFileName() {
         XCTAssertEqual(GirlState.idle.fileName, "idle.png")
-        XCTAssertEqual(GirlState.allCases.count, 24)
+        XCTAssertEqual(GirlState.allCases.count, 28)
     }
 
     func testImageChainFallsBackToIdle() {
@@ -71,10 +75,26 @@ final class CharacterTests: XCTestCase {
         XCTAssertEqual(GirlState.idle.imageChain, [.idle, .idle])
     }
 
+    func testHurtfulText() {
+        XCTAssertTrue(HurtfulText.isHurtful("バカ"))
+        XCTAssertTrue(HurtfulText.isHurtful("もう うざい"))
+        XCTAssertTrue(HurtfulText.isHurtful("You are useless"))
+        XCTAssertFalse(HurtfulText.isHurtful("ありがとう、助かったよ"))
+        XCTAssertFalse(HurtfulText.isHurtful("スクショの撮り方は？"))
+    }
+
     func testSecretMode() {
+        // POIN 呼び（大文字小文字・かな問わず）
+        XCTAssertTrue(SecretMode.isTriggered(by: "POIN"))
+        XCTAssertTrue(SecretMode.isTriggered(by: "poin"))
+        XCTAssertTrue(SecretMode.isTriggered(by: " ポイン "))
+        XCTAssertTrue(SecretMode.isTriggered(by: "ぽいん"))
+        // 旧「裏モード」も後方互換で有効
         XCTAssertTrue(SecretMode.isTriggered(by: "裏モード"))
         XCTAssertTrue(SecretMode.isTriggered(by: "  裏 モード "))
         XCTAssertTrue(SecretMode.isTriggered(by: "うらもーど"))
+        // 誤爆しない
+        XCTAssertFalse(SecretMode.isTriggered(by: "point"))   // poin を含むが別語
         XCTAssertFalse(SecretMode.isTriggered(by: "表モード"))
         XCTAssertFalse(SecretMode.isTriggered(by: "こんにちは"))
     }

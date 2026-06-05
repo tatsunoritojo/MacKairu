@@ -79,9 +79,36 @@ struct ChatPanel: View {
         }
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
         .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(.white.opacity(0.35), lineWidth: 0.5))
-        .frame(width: 300, height: 380)
+        // 左上のグリップをドラッグして大きさ変更（ウィンドウは右下基準で上・左へ伸びる）。
+        .overlay(alignment: .topLeading) { resizeGrip }
+        .frame(width: model.chatWidth, height: model.chatHeight)
         .shadow(color: .black.opacity(0.25), radius: 14, y: 6)
         .onAppear { inputFocused = true }
+    }
+
+    /// 左上のリサイズグリップ。上・左へドラッグすると広がる。
+    private var resizeGrip: some View {
+        Image(systemName: "arrow.up.left.and.arrow.down.right")
+            .font(.system(size: 9, weight: .bold))
+            .foregroundStyle(.secondary)
+            .padding(5)
+            .background(.ultraThinMaterial, in: Circle())
+            .padding(5)
+            .contentShape(Rectangle())
+            .onHover { inside in
+                if inside { NSCursor.crosshair.push() } else { NSCursor.pop() }
+            }
+            .gesture(
+                // 画面座標で測ると、リサイズで欄が動いても値が暴れない。
+                DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                    .onChanged { v in
+                        model.chatResizeBegan()
+                        // 左へ(width 負)・上へ(height 負)で拡大 → 符号反転。
+                        model.chatResizeChanged(dx: -v.translation.width, dy: -v.translation.height)
+                    }
+                    .onEnded { _ in model.chatResizeEnded() }
+            )
+            .help("ドラッグでチャット欄の大きさを変更")
     }
 
     private var header: some View {
