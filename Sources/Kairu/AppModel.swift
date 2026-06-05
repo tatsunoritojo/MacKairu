@@ -35,8 +35,15 @@ final class AppModel: ObservableObject {
 
     /// 泳ぎ中か（ヒレを大きく振る）。
     @Published var isSwimming = false
-    /// 左を向いているか（泳ぐ向きで反転）。
+    /// 左を向いているか（泳ぐ向きで反転）。通常キャラの泳ぎ向き用。
     @Published var facingLeft = false
+    /// 裏キャラ画像の左右反転（発見ポーズでカーソル方向を向く用）。
+    @Published var girlFlip = false
+
+    /// 発見モーションの残り時間と、その後カーソルへ走るための保留。
+    private var discoverTimer: Double = 0
+    private var pendingApproach = false
+    private var approachFlip = false
 
     private var swimTimer: Timer?
     private var chatterTimer: Timer?
@@ -61,19 +68,43 @@ final class AppModel: ObservableObject {
     /// 「お前を消す方法」で消される最中（悲しくフェードアウト中）。
     @Published var girlDying = false
     private var girlImages: [GirlState: NSImage] = [:]
-    /// 表示すべき裏キャラ画像。
-    var girlCurrentImage: NSImage? { girlImages[girlDisplay] ?? girlImages[.idle] }
+    /// 表示すべき裏キャラ画像。未配置の状態はフォールバック連鎖で近い既存画像に代替する。
+    var girlCurrentImage: NSImage? {
+        for s in girlDisplay.imageChain {
+            if let img = girlImages[s] { return img }
+        }
+        return girlImages[.idle]
+    }
     var hasGirlImages: Bool { girlImages[.idle] != nil }
 
     private var patMonitorGlobal: Any?
     private var patMonitorLocal: Any?
     private var girlTimer: Timer?
     private var mouseHistory: [(p: NSPoint, t: Double)] = []
-    private var headHoverTime: Double = 0
-    private var cooldownUntil: Double = 0
-    private var endUntil: Double = 0
     private var lastTick: Double = 0
-    private var pamperFlip: Double = 0
+    /// 頭なで状態機械（純粋ロジックは KairuCore 側）。
+    private var pettingMachine = PettingMachine()
+    /// 掴み（左ボタン保持）の追跡。mouseDown/Up/Dragged イベントで即時更新する。
+    private var isHeld = false
+    private var heldStart: Double = 0
+    private var didDrag = false
+    private var lastDragTime: Double = 0
+    /// 掴み表示までの遅延（秒）。短いほど反応が良い。クリックでチャットを開く誤爆を弾く最小限。
+    private let holdShowDelay: Double = 0.08
+    /// 左ボタンのイベント監視（掴み/ドラッグ検出）。
+    private var btnMonitorGlobal: Any?
+    private var btnMonitorLocal: Any?
+    /// 振り回し量の累積（方向転換×移動量）。閾値超で目を回す。
+    private var whirlScore: Double = 0
+    private var lastWhirlPos: NSPoint?
+    private var lastWhirlAngle: Double?
+    private let whirlThreshold: Double = 9      // これを超えて振り回されると目を回す
+    private let whirlDecayPerSec: Double = 2.5   // 振り回しが穏やかだと冷める速さ
+    /// 目を回している残り時間（秒）と表情往復用フェーズ。
+    private var dizzyTimer: Double = 0
+    private var dizzyPhase: Double = 0
+    private let dizzyDuration: Double = 2.6
+    private let dizzyFlip: Double = 0.28         // dizzy↔dizzy2 の往復間隔
 
     /// 裏キャラ画像フォルダ。
     static var girlDir: URL {
@@ -107,14 +138,21 @@ final class AppModel: ObservableObject {
         for s in GirlState.allCases {
             // 1) ユーザーが取り込んだ上書き（config）→ 2) プロジェクト同梱（バンドル）。
             let override = Self.girlDir.appendingPathComponent(s.fileName)
-            if let img = NSImage(contentsOf: override) {
+            if let img = NSImage(contentsOf: override), Self.isTransparent(img) {
                 girlImages[s] = img
             } else if let url = Bundle.main.resourceURL?
                 .appendingPathComponent("girl/\(s.fileName)"),
-                let img = NSImage(contentsOf: url) {
+                let img = NSImage(contentsOf: url), Self.isTransparent(img) {
                 girlImages[s] = img
             }
         }
+    }
+
+    /// 透過アルファを持つ画像か。背景が不透明な画像は白box事故になるので採用しない（フォールバックさせる）。
+    private static func isTransparent(_ img: NSImage) -> Bool {
+        guard let tiff = img.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff) else { return false }
+        return rep.hasAlpha
     }
 
     /// 履歴量に応じた太り具合（0〜1）。裏キャラは太らない。
@@ -199,9 +237,12 @@ final class AppModel: ObservableObject {
         character = c
         UserDefaults.standard.set(c.rawValue, forKey: characterKey)
         onCharacterChanged?(c)
+        // 裏キャラはドラッグ時にカーソル位置へ自前追従するので、ネイティブ背景ドラッグは切る。
+        window?.isMovableByWindowBackground = (c != .girl)
         if c == .girl {
             resetGirlState()
             startPatTracking()
+            maybeGreet() // 初めて POIN が現れた時だけ挨拶
             bubble = hasGirlImages
                 ? "…裏モード。頭、撫でてくれてもいいんだよ？"
                 : "裏キャラの画像がまだないよ。設定 →「裏キャラ」で取り込んでね。"
@@ -221,13 +262,13 @@ final class AppModel: ObservableObject {
                               : "通常モードに戻すね。"))
     }
 
-    /// 裏キャラの画像（5枚: 待機/気づき/甘え/甘えループ/余韻）を取り込む。
-    /// ファイル名で状態に振り分ける（noticed/waiting/pampering/pampering2/afterglowing 等）。
+    /// 裏キャラの画像（最大12枚: 待機/遠待機2/駆け出し2/気づき/甘え2/掴み/ドラッグ/余韻/悲しみ）を取り込む。
+    /// ファイル名で状態に振り分ける（idle/rest/doze/run/run2/notice/pamper/pamperLoop/hold/drag/end/sad 等）。
     func importGirlImages() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.png, .jpeg, .image]
         panel.allowsMultipleSelection = true
-        panel.message = "裏キャラの画像（5枚）を選んでください。ファイル名で自動振り分けします。"
+        panel.message = "裏キャラの画像を選んでください（最大12枚）。ファイル名で自動振り分けします。"
         guard panel.runModal() == .OK else { return }
         let dir = Self.girlDir
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -247,9 +288,9 @@ final class AppModel: ObservableObject {
     // MARK: - 頭なでなで 状態機械（裏モード）
 
     private func resetGirlState() {
+        pettingMachine.reset()
         girlState = .idle
-        headHoverTime = 0
-        cooldownUntil = 0
+        girlDisplay = .idle
         mouseHistory = []
         lastTick = 0
         isBeingPatted = false
@@ -264,6 +305,15 @@ final class AppModel: ObservableObject {
             DispatchQueue.main.async { self?.recordMouse() }
             return e
         }
+        // 掴み/ドラッグはイベント駆動で即時検出（ポーリングのラグを無くす）。
+        let btnMask: NSEvent.EventTypeMask = [.leftMouseDown, .leftMouseUp, .leftMouseDragged]
+        btnMonitorGlobal = NSEvent.addGlobalMonitorForEvents(matching: btnMask) { [weak self] e in
+            Task { @MainActor in self?.handleMouseButton(e) }
+        }
+        btnMonitorLocal = NSEvent.addLocalMonitorForEvents(matching: btnMask) { [weak self] e in
+            Task { @MainActor in self?.handleMouseButton(e) }
+            return e
+        }
         // 20fps で状態を更新。
         girlTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tickGirl() }
@@ -273,8 +323,11 @@ final class AppModel: ObservableObject {
     func stopPatTracking() {
         if let m = patMonitorGlobal { NSEvent.removeMonitor(m); patMonitorGlobal = nil }
         if let m = patMonitorLocal { NSEvent.removeMonitor(m); patMonitorLocal = nil }
+        if let m = btnMonitorGlobal { NSEvent.removeMonitor(m); btnMonitorGlobal = nil }
+        if let m = btnMonitorLocal { NSEvent.removeMonitor(m); btnMonitorLocal = nil }
         girlTimer?.invalidate(); girlTimer = nil
         mouseHistory = []
+        isHeld = false; didDrag = false
     }
 
     private func recordMouse() {
@@ -282,7 +335,79 @@ final class AppModel: ObservableObject {
         mouseHistory.append((NSEvent.mouseLocation, ProcessInfo.processInfo.systemUptime))
     }
 
-    /// 撫で状態の更新（仕様の状態機械）。
+    /// 左ボタンのイベントを掴み/ドラッグに変換する。
+    private func handleMouseButton(_ e: NSEvent) {
+        guard character == .girl, hasGirlImages else { return }
+        switch e.type {
+        case .leftMouseDown:
+            // チャットを開いている時の入力操作は掴み扱いしない。
+            guard !isChatOpen, let window else { return }
+            // キャラのウィンドウ上で押した時だけ掴み開始（即時）。
+            if window.frame.insetBy(dx: -8, dy: -8).contains(NSEvent.mouseLocation) {
+                isHeld = true
+                heldStart = ProcessInfo.processInfo.systemUptime
+                didDrag = false
+                discoverTimer = 0; pendingApproach = false // 掴んだら発見シーケンスは中断
+                whirlScore = 0
+                lastWhirlPos = NSEvent.mouseLocation
+                lastWhirlAngle = nil
+            }
+        case .leftMouseDragged:
+            guard isHeld else { return }
+            // 移動が起きて初めて「ドラッグ」。ここからカーソル位置へ追従させる。
+            didDrag = true
+            lastDragTime = ProcessInfo.processInfo.systemUptime
+            accumulateWhirl(NSEvent.mouseLocation)
+            followDragToCursor()
+        case .leftMouseUp:
+            if isHeld {
+                isHeld = false; didDrag = false; saveOrigin()
+                // 振り回しが一定以上なら、手を離したあとふらふら目を回す。
+                if whirlScore > whirlThreshold { dizzyTimer = dizzyDuration; dizzyPhase = 0 }
+                whirlScore = 0; lastWhirlPos = nil; lastWhirlAngle = nil
+            }
+        default:
+            break
+        }
+    }
+
+    /// ドラッグ中、画像内に描かれたカーソル先端が現実のマウスに重なるようウィンドウを再配置する。
+    private func followDragToCursor() {
+        guard let window,
+              let anchor = girlDisplay.cursorAnchor ?? GirlState.drag.cursorAnchor,
+              let img = girlImages[.drag] ?? girlCurrentImage else { return }
+        let mouse = NSEvent.mouseLocation
+        let side = dolphinSide                       // 裏キャラの一辺（fat=0）
+        let r = img.size.width / max(img.size.height, 1)
+        let imgW = side * r                          // 正方フレーム内で高さ合わせ → 横は中央寄せ
+        let pad: CGFloat = 12                         // RootView の padding(12)
+        let winW = window.frame.width
+        let boxLeft = winW - pad - side               // キャラ枠は bottomTrailing
+        let imgLeft = boxLeft + (side - imgW) / 2
+        // アンカー（画像左上原点）をウィンドウのローカル座標（左下原点）へ。
+        let px = imgLeft + CGFloat(anchor.x) * imgW
+        let py = pad + side * (1 - CGFloat(anchor.y))
+        window.setFrameOrigin(NSPoint(x: mouse.x - px, y: mouse.y - py))
+    }
+
+    /// ドラッグの「振り回し」量を累積する。方向転換が大きいほど・速いほど多く溜まる。
+    /// まっすぐ運ぶだけでは溜まらず、ブンブン振り回すと一気に溜まる。
+    private func accumulateWhirl(_ p: NSPoint) {
+        defer { lastWhirlPos = p }
+        guard let lp = lastWhirlPos else { return }
+        let dx = p.x - lp.x, dy = p.y - lp.y
+        let dist = hypot(dx, dy)
+        guard dist > 3 else { return }
+        let angle = atan2(dy, dx)
+        if let last = lastWhirlAngle {
+            var d = abs(angle - last)
+            if d > .pi { d = 2 * .pi - d }      // 0〜π の方向転換量
+            whirlScore += Double(d) * Double(min(dist, 40)) / 40
+        }
+        lastWhirlAngle = angle
+    }
+
+    /// 撫で状態の更新。マウス・ウィンドウから入力を組み立て、遷移は PettingMachine に委譲する。
     private func tickGirl() {
         if girlDying { return } // 終了演出中は何もしない
         let now = ProcessInfo.processInfo.systemUptime
@@ -291,76 +416,134 @@ final class AppModel: ObservableObject {
         // 直近 0.4 秒の軌跡だけ残す。
         mouseHistory.removeAll { now - $0.t > 0.4 }
 
-        // なで反応 OFF / 泳ぎ中 / 画像なし は待機に戻す。
-        guard character == .girl, isNadeEnabled, hasGirlImages, !isSwimming, let window else {
-            if girlState != .idle && girlState != .end { setGirlState(.idle) }
-            return
-        }
+        let enabled = character == .girl && isNadeEnabled && hasGirlImages && !isSwimming && window != nil
 
-        let m = NSEvent.mouseLocation
-        // 速度（px/sec）。
+        var inZone = false
         var speed: CGFloat = 0
-        if let first = mouseHistory.first, mouseHistory.count >= 2 {
-            let span = now - first.t
-            if span > 0.01 { speed = hypot(m.x - first.p.x, m.y - first.p.y) / CGFloat(span) }
-        }
-        // 頭の当たり判定（横長楕円・頭頂〜前髪あたり）。
-        let f = window.frame
-        let hx = f.midX, hy = f.maxY - f.height * 0.20
-        let rx = f.width * 0.32, ry = f.height * 0.16
-        let nx = (m.x - hx) / rx, ny = (m.y - hy) / ry
-        let inZone = (nx * nx + ny * ny) <= 1
-        // 頭付近での左右の揺れ（撫でっぽさ）。
-        let xs = mouseHistory.map { $0.p.x }
-        let xWobble = (xs.max() ?? 0) - (xs.min() ?? 0)
-        let petLike = inZone && xWobble > 8 && xWobble < 140 && speed < 500
-
-        if cooldownUntil > now, girlState != .end {
-            setGirlState(.idle); headHoverTime = 0; return
-        }
-
-        switch girlState {
-        case .idle:
-            if inZone && speed < 400 {
-                headHoverTime += dt
-                if headHoverTime > 0.18 { setGirlState(.notice) }
-            } else { headHoverTime = 0 }
-        case .notice:
-            if !inZone { setGirlState(.idle); headHoverTime = 0 }
-            else if petLike || headHoverTime > 0.35 { setGirlState(.pamper); pamperFlip = 0 }
-            else { headHoverTime += dt }
-        case .pamper:
-            if !inZone || speed > 500 { endPamper(now) }
-            else { pamperFlip += dt; if pamperFlip > 0.25 { pamperFlip = 0; girlState = .pamperLoop } }
-        case .pamperLoop:
-            if !inZone || speed > 500 { endPamper(now) }
-            else {
-                // 甘え中は pamper ↔ pamperLoop の画像をゆっくり往復。
-                pamperFlip += dt
-                if pamperFlip > 0.5 {
-                    pamperFlip = 0
-                    girlDisplay = (girlDisplay == .pamperLoop) ? .pamper : .pamperLoop
-                }
+        var xWobble: CGFloat = 0
+        var distance: CGFloat = 0
+        var reportHeld = false
+        var dragging = false
+        if let window {
+            let m = NSEvent.mouseLocation
+            // 速度（px/sec）。
+            if let first = mouseHistory.first, mouseHistory.count >= 2 {
+                let span = now - first.t
+                if span > 0.01 { speed = hypot(m.x - first.p.x, m.y - first.p.y) / CGFloat(span) }
             }
-        case .end:
-            if now > endUntil { setGirlState(.idle) }
-        case .sad:
-            break // 演出専用。状態機械では遷移しない
+            let f = window.frame
+            // 頭の当たり判定（横長楕円）。撫でやすいよう頭〜上半身を広めにカバー。
+            let hx = f.midX, hy = f.maxY - f.height * 0.22
+            let rx = f.width * 0.42, ry = f.height * 0.24
+            let nx = (m.x - hx) / rx, ny = (m.y - hy) / ry
+            inZone = (nx * nx + ny * ny) <= 1
+            // 頭付近での左右の揺れ（撫でっぽさ）。
+            let xs = mouseHistory.map { $0.p.x }
+            xWobble = (xs.max() ?? 0) - (xs.min() ?? 0)
+            // キャラ中心からカーソルまでの距離（遠い待機の判定）。
+            distance = hypot(m.x - f.midX, m.y - f.midY)
+
+            // 掴み／ドラッグは handleMouseButton（イベント駆動）で更新済み。ここでは表示判定のみ。
+            // 安全策: mouseUp を取りこぼしても、ボタンが上がっていれば解除する。
+            if isHeld, (NSEvent.pressedMouseButtons & 0x1) == 0 {
+                isHeld = false; didDrag = false; saveOrigin()
+            }
+            if isHeld {
+                dragging = didDrag && (now - lastDragTime < 0.16)
+                // クリックでチャットを開く誤爆を避けるため、掴み表示は少しだけ溜める。
+                // ドラッグ（移動）が起きていれば即座に表示。
+                reportHeld = dragging || (now - heldStart > holdShowDelay)
+            }
         }
-        isBeingPatted = (girlState == .pamper || girlState == .pamperLoop)
+
+        pettingMachine.update(PettingMachine.Input(
+            dt: dt, inZone: inZone, speed: Double(speed),
+            xWobble: Double(xWobble), distance: Double(distance), enabled: enabled,
+            isHeld: reportHeld, isDragging: dragging, isMoving: isSwimming))
+
+        girlState = pettingMachine.state
+        girlDisplay = pettingMachine.display
+        isBeingPatted = pettingMachine.isBeingPatted
+
+        // 振り回しの累積は穏やかだと少しずつ冷める。
+        if !isHeld && whirlScore > 0 {
+            whirlScore = max(0, whirlScore - dt * whirlDecayPerSec)
+        }
+
+        girlFlip = false // 既定は反転なし（発見ポーズの時だけ向きを変える）
+
+        if discoverTimer > 0, !isHeld, !isChatOpen {
+            // 移動直前の発見ポーズ。カーソル方向を向き、知覚できる間を置いてから走り出す。
+            discoverTimer -= dt
+            girlDisplay = .found
+            girlFlip = approachFlip
+            isBeingPatted = false
+            if discoverTimer <= 0, pendingApproach {
+                pendingApproach = false
+                performSwim(goToCursor: true)
+            }
+        } else if dizzyTimer > 0, !isHeld {
+            // 手を離したあと、ふらふら目を回す（掴み直したら中断）。
+            dizzyTimer -= dt
+            dizzyPhase += dt
+            girlDisplay = dizzyPhase.truncatingRemainder(dividingBy: dizzyFlip * 2) < dizzyFlip
+                ? .dizzy : .dizzy2
+            isBeingPatted = false
+        } else if greetTimer > 0, !isHeld {
+            // 初回起動の挨拶。3枚を順番に見せる（掴んだら中断）。
+            greetTimer -= dt
+            let idx = Int((greetDuration - greetTimer) / 1.4) % 3
+            girlDisplay = idx == 0 ? .greet : (idx == 1 ? .greet2 : .greet3)
+            isBeingPatted = false
+        } else if isThinking, !isHeld {
+            // AIが返答を考えている間（うーん…／むむ…をゆっくり往復）。
+            thinkingTimer -= dt
+            if thinkingTimer <= 0 {
+                thinkingAlt.toggle()
+                thinkingTimer = Double.random(in: 0.9...1.5)
+            }
+            girlDisplay = thinkingAlt ? .thinking2 : .thinking
+            isBeingPatted = false
+        } else if isChatOpen, messages.last?.role == .assistant,
+                  girlState != .hold, girlState != .drag {
+            // 回答を提示している間は解説ポーズ。ときどきウインク（話してる感）。
+            // 開いている時間は 1.8〜3.6 秒のランダムで、機械的な周期感を消す。
+            teachingTimer -= dt
+            if teachingTimer <= 0 {
+                teachingWinking.toggle()
+                teachingTimer = teachingWinking
+                    ? teachingWinkDuration
+                    : Double.random(in: 1.8...3.6)
+            }
+            girlDisplay = teachingWinking ? .teaching2 : .teaching
+            isBeingPatted = false
+        } else {
+            teachingWinking = false
+            teachingTimer = Double.random(in: 1.8...3.6)
+            thinkingAlt = false
+            thinkingTimer = 0
+            // 発見シーケンスが中断された場合は破棄。
+            if discoverTimer > 0 { discoverTimer = 0; pendingApproach = false }
+        }
     }
 
-    private func setGirlState(_ s: GirlState) {
-        girlState = s
-        girlDisplay = s
-        if s != .pamper && s != .pamperLoop { isBeingPatted = false }
-    }
+    private var teachingWinking = false
+    private var teachingTimer: Double = 0
+    private let teachingWinkDuration: Double = 0.32
+    private var thinkingAlt = false
+    private var thinkingTimer: Double = 0
+    /// 初回挨拶の残り時間（秒）。
+    private var greetTimer: Double = 0
+    private let greetDuration: Double = 4.6
+    /// 初回挨拶を一度だけ出すためのフラグキー。
+    private let greetedKey = "girlGreetedV1"
 
-    private func endPamper(_ now: Double) {
-        setGirlState(.end)
-        endUntil = now + 0.5
-        cooldownUntil = now + 1.5
-        isBeingPatted = false
+    /// 初回だけ挨拶シーケンスを開始する（裏キャラが初めて現れた時）。
+    private func maybeGreet() {
+        guard character == .girl, hasGirlImages else { return }
+        guard !UserDefaults.standard.bool(forKey: greetedKey) else { return }
+        UserDefaults.standard.set(true, forKey: greetedKey)
+        greetTimer = greetDuration
     }
 
     // MARK: - 文脈の取り込み（クリップボード／スクショ）
@@ -475,7 +658,7 @@ final class AppModel: ObservableObject {
     func startMischief() {
         scheduleSwim()
         scheduleChatter()
-        if character == .girl { startPatTracking() }
+        if character == .girl { startPatTracking(); maybeGreet() }
     }
 
     private func scheduleSwim() {
@@ -486,18 +669,29 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// すーっと泳いで移動する。約20%の確率でマウスカーソルの位置へ寄ってくる。
+    /// 移動のトリガ。裏モードはまず「発見ポーズ」を挟んでから走る。通常キャラは即移動。
     private func swim() {
-        guard isAnnoyEnabled, !isChatOpen, !isThinking,
-              let window, let screen = window.screen ?? NSScreen.main else { return }
-        // 裏モードで撫でられ中・終了演出中は動かない。
-        if character == .girl && (girlState != .idle || girlDying) { return }
+        guard isAnnoyEnabled, !isChatOpen, !isThinking, let window else { return }
+        if isSwimming || discoverTimer > 0 { return }
+        if character == .girl {
+            if girlState != .idle || girlDying { return }
+            // カーソルを見つける発見モーションを挟む。マウスが自分より右なら反転して向く。
+            approachFlip = NSEvent.mouseLocation.x > window.frame.midX
+            discoverTimer = Double.random(in: 0.6...1.0) // 知覚できる発見の間
+            pendingApproach = true
+            return
+        }
+        performSwim(goToCursor: Double.random(in: 0 ..< 1) < 0.2)
+    }
+
+    /// 実際に泳いで移動する。裏モードは常にカーソルへ、通常は引数で制御。
+    private func performSwim(goToCursor: Bool) {
+        guard let window, let screen = window.screen ?? NSScreen.main else { return }
+        if character == .girl && girlDying { return }
         let size = window.frame.size
         let from = window.frame.origin
         let margin = dolphinSide * 0.5
 
-        // 裏モードは100%カーソルへ。通常は20%。
-        let goToCursor = character == .girl ? true : (Double.random(in: 0 ..< 1) < 0.2)
         let targetScreen: NSScreen
         var cx: CGFloat
         var cy: CGFloat
@@ -577,8 +771,9 @@ final class AppModel: ObservableObject {
             if character == .girl, girlImages[.sad] != nil {
                 // 裏モード: 悲しい顔でブルブル震えながら 5 秒かけてフェードアウト。
                 messages.append(ChatMessage(role: .assistant,
-                    text: "え…わたしを、消すんですか…？\n……ばいばい。"))
+                    text: "え…ぼくを、消すんですか…？\n……ばいばい。"))
                 stopPatTracking()
+                pettingMachine.enterSad()
                 girlDisplay = .sad
                 girlDying = true
                 DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { KairuQuit.now() }
@@ -617,7 +812,10 @@ final class AppModel: ObservableObject {
             return
         }
         isThinking = true
-        let client = AIClient(config: config)
+        // 裏モード（POIN）のときは少女の人格プロンプトに差し替える。
+        var requestConfig = config
+        if character == .girl { requestConfig.systemPrompt = AppConfig.girlSystemPrompt }
+        let client = AIClient(config: requestConfig)
         let history = messages
         Task {
             do {

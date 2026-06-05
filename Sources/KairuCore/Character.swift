@@ -30,30 +30,113 @@ public enum Character: String, CaseIterable, Identifiable, Sendable {
         case .cat: return "🐱"
         case .penguin: return "🐧"
         case .chick: return "🐤"
-        case .girl: return "💗"
+        case .girl: return "✨"
         }
     }
 }
 
-/// 裏キャラ（女の子）の頭なで状態。各状態に対応する画像ファイル名を持つ。
+/// 裏キャラ（女の子）の頭なで・移動・ドラッグ状態。各状態に対応する画像ファイル名を持つ。
 public enum GirlState: String, CaseIterable, Sendable {
-    case idle        // ん…？（待機）
+    case idle        // ん…？（カーソルが近い時のきりっとした待機）
+    case rest        // ふぅ…（旧・遠い待機。現在は未使用、フォールバック用に保持）
+    case doze        // すぅ…（旧・遠い待機。現在は未使用）
+    case search      // どこ…？（カーソルが遠い時、キョロキョロ探す1）
+    case search2     // んー…？（キョロキョロ探す2）
+    case found       // いた！（移動直前の発見ポーズ）
+    case run         // たっ（カーソルへ駆け出す・1枚目）
+    case run2        // たたっ（カーソルへ駆け出す・2枚目／走りループ）
     case notice      // 待ってください、そっちですか？（気づき/反応開始）
     case pamper      // えへへ（甘え始め）
     case pamperLoop  // えへ（甘え継続ループ）
+    case hold        // わっ（掴まれて持ち上げられた・驚き）
+    case drag        // えへへ（掴まれたまま運ばれている・うれしい）
+    case thinking    // うーん…（AIが返答を考えている間）
+    case thinking2   // むむ…（思考中の差分）
+    case teaching    // ここがポイント！（チャットで解説している時）
+    case teaching2   // ね？（解説中の表情差分・ウインク）
+    case dizzy       // ぐるぐる…（振り回されて目を回している）
+    case dizzy2      // ふらふら…（目回しの差分）
+    case greet       // やっほー！（初回起動の挨拶1）
+    case greet2      // こんにちはー！（初回起動の挨拶2）
+    case greet3      // よろしくねー！（初回起動の挨拶3）
     case end         // …もう終わり？（余韻）
     case sad         // 「お前を消す方法」で終了される時の悲しい顔（演出専用）
 
     /// 画像ファイル名（girl/<name>.png）。
     public var fileName: String { rawValue + ".png" }
 
-    /// 取り込んだファイル名から状態を推定（noticed/waiting/pampering/pampering2/afterglowing/sad 等）。
+    /// 絵ごとのキャラ描画サイズ差を吸収する表示倍率。
+    /// teaching2 は素材内でキャラが約3.7%大きく描かれているため、teaching と同じ見かけに合わせる。
+    public var displayScale: Double {
+        switch self {
+        case .teaching2: return 0.963
+        case .dizzy2:    return 0.983  // dizzy と同じ見かけサイズに合わせる
+        case .thinking2: return 1.015  // thinking と同じ見かけサイズに合わせる
+        case .search2:   return 1.028  // search と同じ見かけサイズに合わせる
+        default:         return 1.0
+        }
+    }
+
+    /// 画像内に描かれたカーソル先端の位置（画像座標・左上原点の正規化 0〜1）。
+    /// 掴み/ドラッグ時に、現実のマウスをこの位置へ重ねるためのアンカー。無い状態は nil。
+    public var cursorAnchor: (x: Double, y: Double)? {
+        switch self {
+        case .drag: return (0.52, 0.05)
+        case .hold: return (0.61, 0.05)
+        default:    return nil
+        }
+    }
+
+    /// 表示用フォールバック連鎖。新規画像が未配置でも近い既存画像で代替し、欠けは idle で埋める。
+    public var imageChain: [GirlState] {
+        switch self {
+        case .doze:       return [.doze, .rest, .idle]
+        case .rest:       return [.rest, .idle]
+        case .run2:       return [.run2, .run, .idle]
+        case .run:        return [.run, .idle]
+        case .pamperLoop: return [.pamperLoop, .pamper, .idle]
+        case .drag:       return [.drag, .hold, .pamper, .idle]
+        case .hold:       return [.hold, .notice, .idle]
+        case .thinking:   return [.thinking, .teaching, .notice, .idle]
+        case .thinking2:  return [.thinking2, .thinking, .teaching, .idle]
+        case .teaching:   return [.teaching, .notice, .idle]
+        case .teaching2:  return [.teaching2, .teaching, .notice, .idle]
+        case .dizzy:      return [.dizzy, .idle]
+        case .dizzy2:     return [.dizzy2, .dizzy, .idle]
+        case .search:     return [.search, .idle]
+        case .search2:    return [.search2, .search, .idle]
+        case .found:      return [.found, .notice, .idle]
+        case .greet2:     return [.greet2, .greet, .idle]
+        case .greet3:     return [.greet3, .greet, .idle]
+        default:          return [self, .idle]
+        }
+    }
+
+    /// 取り込んだファイル名から状態を推定（noticed/waiting/pampering/run/hold/drag/rest/doze/sad 等）。
     public static func from(fileName name: String) -> GirlState? {
         let n = name.lowercased()
         if n.contains("sad") { return .sad }
         if n.contains("afterglow") || n == "end" { return .end }
+        if n.contains("teaching2") || n.contains("teach2") || n.contains("tip2") { return .teaching2 }
+        if n.contains("teach") || n.contains("tip") || n.contains("explain") { return .teaching }
+        if n.contains("confused2") || n.contains("dizzy2") { return .dizzy2 }
+        if n.contains("confus") || n.contains("dizzy") { return .dizzy }
+        if n.contains("thinking2") || n.contains("thiking2") || n.contains("think2") { return .thinking2 }
+        if n.contains("thinking") || n.contains("thiking") || n.contains("think") { return .thinking }
+        if n.contains("greeting2") || n.contains("greet2") { return .greet2 }
+        if n.contains("greeting3") || n.contains("greet3") { return .greet3 }
+        if n.contains("greet") || n.contains("hello") || n.contains("hi") { return .greet }
+        if n.contains("wondering2") || n.contains("search2") || n.contains("look2") { return .search2 }
+        if n.contains("wondering") || n.contains("search") || n.contains("look") { return .search }
+        if n.contains("got_it") || n.contains("gotit") || n.contains("found") { return .found }
+        if n.contains("drag") { return .drag }
+        if n.contains("hold") || n.contains("grab") || n.contains("lift") || n.contains("pick") { return .hold }
+        if n.contains("run2") || n.contains("dash2") || n.contains("walk2") { return .run2 }
+        if n.contains("run") || n.contains("dash") || n.contains("walk") { return .run }
         if n.contains("pampering2") || n.contains("pamperloop") { return .pamperLoop }
         if n.contains("pamper") { return .pamper }
+        if n.contains("doze") || n.contains("sleep") || n.contains("rest2") { return .doze }
+        if n.contains("rest") || n.contains("relax") { return .rest }
         if n.contains("wait") || n == "notice" { return .notice }
         if n.contains("notic") || n == "idle" { return .idle }
         return nil

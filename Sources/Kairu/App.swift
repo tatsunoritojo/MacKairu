@@ -77,7 +77,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = false
-        panel.isMovableByWindowBackground = true // 背景ドラッグでネイティブ移動
+        // 背景ドラッグでネイティブ移動。裏キャラだけは自前でカーソル追従するため後で切り替える。
+        panel.isMovableByWindowBackground = (model.character != .girl)
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.hidesOnDeactivate = false
 

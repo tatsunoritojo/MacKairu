@@ -15,10 +15,14 @@ struct CharacterView: View {
     var flip: Bool = false
     /// 裏キャラの画像。
     var girlImage: NSImage? = nil
+    /// 裏キャラ画像ごとの見かけサイズ補正（素材間の描画サイズ差を吸収）。
+    var girlImageScale: Double = 1.0
     /// 裏キャラが頭を撫でられている最中。
     var patted: Bool = false
     /// 「お前を消す方法」で消される最中（ブルブル震えてフェードアウト）。
     var dying: Bool = false
+    /// 振り回されて目を回している最中（ふらふら揺れる）。
+    var dizzy: Bool = false
 
     @State private var dyingStart: Double?
 
@@ -30,7 +34,8 @@ struct CharacterView: View {
             let blinkPhase = t.truncatingRemainder(dividingBy: 4.0)
             let isBlinking = blinkPhase < 0.15
             let swimWiggle = swimming ? sin(t * 8) * 6 : 0
-            let tilt = (thinking ? sin(t * 3) * 6 : 0) + swimWiggle
+            let dizzyWobble = dizzy ? sin(t * 6.5) * 10 : 0
+            let tilt = (thinking ? sin(t * 3) * 6 : 0) + swimWiggle + dizzyWobble
             let fatW = 1 + fat * 0.12
             let fatH = 1 + fat * 0.24
             let side = 120 * scale
@@ -38,6 +43,7 @@ struct CharacterView: View {
             Group {
                 if character == .girl {
                     girlView(side: side, t: t)
+                        .scaleEffect(x: flip ? -1 : 1, y: 1)
                 } else {
                     Canvas { ctx, size in
                         switch character {
@@ -80,6 +86,7 @@ struct CharacterView: View {
                     .interpolation(.high)      // 最高画質で補間
                     .antialiased(true)
                     .scaledToFit()
+                    .scaleEffect(girlImageScale)   // 素材間サイズ差の補正
                     .scaleEffect((patted && !dying) ? 1.06 : 1.0)
                     .animation(.spring(response: 0.25, dampingFraction: 0.5), value: patted)
                     .offset(x: shakeX, y: shakeY)
@@ -90,18 +97,6 @@ struct CharacterView: View {
                     Image(systemName: "person.crop.circle.badge.questionmark")
                         .font(.system(size: side * 0.32))
                         .foregroundStyle(.pink.opacity(0.7))
-                }
-            }
-            // なでなで中はハートが舞う（終了演出中は出さない）。
-            if patted && !dying {
-                ForEach(0..<3, id: \.self) { i in
-                    let phase = t * 1.5 + Double(i) * 0.7
-                    let up = CGFloat((phase.truncatingRemainder(dividingBy: 1.0)))
-                    Text("💗")
-                        .font(.system(size: side * 0.16))
-                        .offset(x: CGFloat(sin(phase * 3)) * side * 0.18,
-                                y: -side * 0.30 - up * side * 0.35)
-                        .opacity(1.0 - up)
                 }
             }
         }

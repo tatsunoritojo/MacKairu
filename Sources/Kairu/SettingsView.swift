@@ -174,10 +174,10 @@ struct SettingsView: View {
             if model.character == .girl {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 8) {
-                        Text("裏キャラ 💗（チャットに「裏モード」で切替）")
+                        Text("裏キャラ ✨（チャットに「裏モード」で切替）")
                             .font(.system(size: 10)).foregroundStyle(.secondary)
                         Spacer()
-                        Button("画像を取り込む（5枚）") { model.importGirlImages() }
+                        Button("画像を取り込む（最大12枚）") { model.importGirlImages() }
                             .font(.system(size: 11))
                     }
                     Toggle(isOn: $nade) {
