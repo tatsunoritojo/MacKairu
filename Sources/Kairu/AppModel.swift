@@ -336,6 +336,13 @@ final class AppModel: ObservableObject {
     /// スクロールでのサイズ調整を有効化（アプリ起動時に一度だけ）。
     /// チャット入力待ち（チャットを開いている）かつカーソルがキャラの上にある時だけ、
     /// スクロール量に連動して倍率を変える。メッセージリスト上のスクロールは妨げない。
+    ///
+    /// 設計メモ:
+    /// - 全キャラ共通の機能なので girl 専用の startPatTracking/stopPatTracking とは別管理。
+    ///   アプリ生存期間と同じ寿命の単一モニタとして持ち、明示的な解放はしない（多重登録のみ guard で防ぐ）。
+    /// - 他のローカルモニタと違い、ここでは「イベントを消費(nil)するか素通り(e)させるか」を同期で
+    ///   返す必要があるため、DispatchQueue.main.async には逃がせない。scrollWheel のローカルモニタは
+    ///   main スレッドで発火するので、@MainActor 隔離状態へ同期アクセスして問題ない。
     func startScrollResize() {
         guard scrollMonitorLocal == nil else { return }
         scrollMonitorLocal = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] e in
