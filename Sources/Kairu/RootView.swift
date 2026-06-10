@@ -282,6 +282,8 @@ struct ChatPanel: View {
                 // フォントは NSTextView 側で設定（SwiftUI の .font は representable に効かない）。
                 .padding(.horizontal, 10)
                 .padding(.vertical, 7)
+                // 行の余り幅を貪欲に占有させる（両脇のアイコンボタンを除いた残り＝幅の大半）。
+                .frame(maxWidth: .infinity)
                 .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
             Button { model.send() } label: {
                 Image(systemName: "arrow.up.circle.fill")
