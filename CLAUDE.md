@@ -3,11 +3,11 @@
 macOS の画面隅に常駐する、ネイティブ SwiftUI 製のデスクトップ・マスコット兼コンシェルジュ。透過・最前面・Dock 非表示で、クリックすると「Mac の操作」を答える AI チャットになる。Windows からの乗り換えユーザー向け。公開リポジトリ: github.com/tatsunoritojo/MacKairu
 
 ## 次セッション着手用
-- 現在地: POIN（裏キャラ）一式を main へマージ・push 済み（origin/main と同期）。今セッションでは撫で余韻を「撫で時間連動の指数飽和カーブ（下限0.5s・上限4s・τ=6）」化、チャット欄のリサイズ対応、ウィンドウの画面内動的配置を実装。テスト58件グリーン。
-- 次アクション: 残課題なし。あえて挙げれば、余韻カーブ（τ=6／下限0.5s）とチャットリサイズ・グリップの実機体感チューニング（ユーザーフィードバック待ち）。
-- 参照ファイル: `Sources/KairuCore/PettingMachine.swift`（`endPamper` の余韻式・`Config`）、`Sources/Kairu/AppModel.swift`（`applyWindowSize` 画面内クランプ・`chatResize*`）、`Sources/Kairu/RootView.swift`（`resizeGrip`）
-- 未解決 / 別扱い: Codex レビューはユーザー判断で通さずマージ確定（対象外）。
-- 最終更新: 2026-06-06
+- 現在地: UI詰め一式を `fix/girl-hitzone` で実装し main へ `--no-ff` マージ済み（マージコミット `d849a3d`、ブランチ削除済み）。内容: (1) POIN頭の当たり判定をキャラ実寸基準に、(2) チャット入力を Return=送信/Shift+Return=改行＋日本語IME変換確定を修正し入力欄を NSTextView 化（IME根本原因は Codex で特定）、(3) 入力欄を chatHeight 連動＋行幅いっぱい、(4) チャット入力待ち中にキャラ上スクロールでサイズ調整、(5) 初回あいさつ強化（吹き出し3段＋弾むモーション）。テスト58件グリーン・ビルド通過。**main は origin より ahead 10 で未 push**。
+- 次アクション: `git push origin main`（Red操作のためユーザー確認後に実行）。
+- 参照ファイル: `Sources/Kairu/RootView.swift`（`ChatInputTextView`/`ChatInputContainerView`/`ChatInputNSTextView`/`NonInteractiveLabel`/`inputMaxLines`/`canSend`）、`Sources/Kairu/AppModel.swift`（`characterSquare`/`girlHeadZone`/`characterScreenRect`・`startScrollResize`・`tickGirl` の greet 分岐・`maybeGreet`）、`Sources/Kairu/CharacterView.swift`（`greeting` モーション）、`Sources/Kairu/App.swift`（起動時 `startScrollResize` 呼び出し）。
+- 未解決 / 別扱い: 実機フィール調整（スクロールの向き・感度 `factor = 1 + delta*0.004`／あいさつの跳ね幅／頭ゾーン値 `headCenterYFrac=0.30`等）はユーザーフィードバック待ち。検証用にローカル defaults（`character=girl`／`dolphinScale`／`girlGreetedV1` リセット）を変更したまま未復元。
+- 最終更新: 2026-06-11
 
 ## 技術スタック
 
