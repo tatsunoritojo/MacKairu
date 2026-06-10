@@ -78,6 +78,8 @@ final class AppModel: ObservableObject {
     @Published var girlDisplay: GirlState = .idle
     /// 「お前を消す方法」で消される最中（悲しくフェードアウト中）。
     @Published var girlDying = false
+    /// 初回挨拶の最中（弾むモーションを出すフラグ）。
+    @Published var girlGreeting = false
     private var girlImages: [GirlState: NSImage] = [:]
     /// 表示すべき裏キャラ画像。未配置の状態はフォールバック連鎖で近い既存画像に代替する。
     var girlCurrentImage: NSImage? {
@@ -105,6 +107,8 @@ final class AppModel: ObservableObject {
     /// 左ボタンのイベント監視（掴み/ドラッグ検出）。
     private var btnMonitorGlobal: Any?
     private var btnMonitorLocal: Any?
+    /// スクロールでのサイズ調整の監視（チャット入力待ち中にキャラ上で有効）。
+    private var scrollMonitorLocal: Any?
     /// 振り回し量の累積（方向転換×移動量）。閾値超で目を回す。
     private var whirlScore: Double = 0
     private var lastWhirlPos: NSPoint?
@@ -225,6 +229,51 @@ final class AppModel: ObservableObject {
 
     var currentTargetSize: NSSize { isChatOpen ? openSize : closedSize }
 
+    // MARK: - 当たり判定ゾーン（キャラ実寸基準）
+
+    /// 頭/体の当たり判定ゾーン。ウィンドウ・ローカル座標（左上原点・y 下向き）で返す。
+    /// キャラは `dolphinSide` の正方形として右下寄せ＋パディング `Self.contentPad` で描画されるので、
+    /// ウィンドウ枠の割合ではなくキャラ実寸から導出する。これでスケール変更に当たり判定が追従する。
+    struct GirlZone {
+        var center: CGPoint   // ローカル座標（左上原点）
+        var rx: CGFloat
+        var ry: CGFloat
+    }
+
+    /// RootView の外周パディング。当たり判定の右下基準に使う。
+    private static let contentPad: CGFloat = 12
+    /// 頭ゾーン: 正方形上端からの中心 Y 位置・楕円半径（いずれも side に対する割合・実機調整値）。
+    private static let headCenterYFrac: CGFloat = 0.30
+    private static let headRadiusXFrac: CGFloat = 0.42
+    private static let headRadiusYFrac: CGFloat = 0.30
+
+    /// キャラ正方形（ローカル座標・左上原点）。右下寄せ＋パディング。
+    /// 頭の当たり判定とスクロールでのサイズ調整のホバー判定で共有する。
+    func characterSquare(windowSize: CGSize) -> CGRect {
+        let s = dolphinSide
+        let x = windowSize.width - Self.contentPad - s
+        let y = windowSize.height - Self.contentPad - s
+        return CGRect(x: x, y: y, width: s, height: s)
+    }
+
+    /// 頭の当たり判定ゾーン（ローカル座標）。キャラ正方形の上部中央付近。
+    func girlHeadZone(windowSize: CGSize) -> GirlZone {
+        let sq = characterSquare(windowSize: windowSize)
+        let s = sq.width
+        return GirlZone(center: CGPoint(x: sq.midX, y: sq.minY + s * Self.headCenterYFrac),
+                        rx: s * Self.headRadiusXFrac,
+                        ry: s * Self.headRadiusYFrac)
+    }
+
+    /// キャラの当たり矩形（スクリーン座標・左下原点）。スクロールでのサイズ調整のホバー判定に使う。
+    func characterScreenRect() -> CGRect? {
+        guard let f = window?.frame else { return nil }
+        let sq = characterSquare(windowSize: f.size)   // ローカル（左上原点）
+        // ローカル → スクリーン（左下原点）。sq.maxY が下端、sq.minY が上端。
+        return CGRect(x: f.minX + sq.minX, y: f.maxY - sq.maxY,
+                      width: sq.width, height: sq.height)
+    }
+
     func reloadConfig() {
         config = AppConfig.load()
         if config?.hasKey == true {
@@ -282,6 +331,35 @@ final class AppModel: ObservableObject {
         pinchStart = nil
         UserDefaults.standard.set(dolphinScale, forKey: scaleKey)
         saveOrigin()
+    }
+
+    /// スクロールでのサイズ調整を有効化（アプリ起動時に一度だけ）。
+    /// チャット入力待ち（チャットを開いている）かつカーソルがキャラの上にある時だけ、
+    /// スクロール量に連動して倍率を変える。メッセージリスト上のスクロールは妨げない。
+    ///
+    /// 設計メモ:
+    /// - 全キャラ共通の機能なので girl 専用の startPatTracking/stopPatTracking とは別管理。
+    ///   アプリ生存期間と同じ寿命の単一モニタとして持ち、明示的な解放はしない（多重登録のみ guard で防ぐ）。
+    /// - 他のローカルモニタと違い、ここでは「イベントを消費(nil)するか素通り(e)させるか」を同期で
+    ///   返す必要があるため、DispatchQueue.main.async には逃がせない。scrollWheel のローカルモニタは
+    ///   main スレッドで発火するので、@MainActor 隔離状態へ同期アクセスして問題ない。
+    func startScrollResize() {
+        guard scrollMonitorLocal == nil else { return }
+        scrollMonitorLocal = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] e in
+            guard let self else { return e }
+            guard self.isChatOpen,
+                  let rect = self.characterScreenRect(),
+                  rect.contains(NSEvent.mouseLocation) else { return e }
+            // トラックパッドはピクセル精度、マウスホイールはライン単位。どちらも scrollingDeltaY を使う。
+            let delta = e.scrollingDeltaY
+            guard delta != 0 else { return nil }
+            // 上スクロールで拡大。慣性で急変しないよう感度は控えめ。
+            let factor = 1 + delta * 0.004
+            self.dolphinScale = min(10.0, max(0.6, self.dolphinScale * factor))
+            UserDefaults.standard.set(self.dolphinScale, forKey: self.scaleKey)
+            self.applyWindowSize(animated: false)
+            return nil   // キャラ上のスクロールは消費し、メッセージリストへ流さない。
+        }
     }
 
     // MARK: - チャット欄のリサイズ（グリップのドラッグ）
@@ -524,16 +602,20 @@ final class AppModel: ObservableObject {
                 if span > 0.01 { speed = hypot(m.x - first.p.x, m.y - first.p.y) / CGFloat(span) }
             }
             let f = window.frame
-            // 頭の当たり判定（横長楕円）。撫でやすいよう頭〜上半身を広めにカバー。
-            let hx = f.midX, hy = f.maxY - f.height * 0.22
-            let rx = f.width * 0.42, ry = f.height * 0.24
-            let nx = (m.x - hx) / rx, ny = (m.y - hy) / ry
+            // 頭の当たり判定（横長楕円）。キャラ実寸（dolphinSide）と右下固定配置から導出。
+            // ゾーンはローカル座標（左上原点）。スクリーン座標（左下原点）へ変換して判定する。
+            let zone = girlHeadZone(windowSize: f.size)
+            let hx = f.minX + zone.center.x          // ローカル x → スクリーン x
+            let hy = f.maxY - zone.center.y          // ローカル y(下向き) → スクリーン y(上向き)
+            let nx = (m.x - hx) / zone.rx, ny = (m.y - hy) / zone.ry
             inZone = (nx * nx + ny * ny) <= 1
             // 頭付近での左右の揺れ（撫でっぽさ）。
             let xs = mouseHistory.map { $0.p.x }
             xWobble = (xs.max() ?? 0) - (xs.min() ?? 0)
-            // キャラ中心からカーソルまでの距離（遠い待機の判定）。
-            distance = hypot(m.x - f.midX, m.y - f.midY)
+            // キャラ中心からカーソルまでの距離（遠い待機の判定）。キャラ正方形の中心を基準にする。
+            let sq = characterSquare(windowSize: f.size)
+            let charCX = f.minX + sq.midX, charCY = f.maxY - sq.midY
+            distance = hypot(m.x - charCX, m.y - charCY)
 
             // 掴み／ドラッグは handleMouseButton（イベント駆動）で更新済み。ここでは表示判定のみ。
             // 安全策: mouseUp を取りこぼしても、ボタンが上がっていれば解除する。
@@ -605,10 +687,13 @@ final class AppModel: ObservableObject {
                 ? .dizzy : .dizzy2
             isBeingPatted = false
         } else if greetTimer > 0, !isHeld {
-            // 初回起動の挨拶。3枚を順番に見せる（掴んだら中断）。
+            // 初回起動の挨拶。3枚＋吹き出し3段を順番に見せ、弾むモーションで存在感を出す（掴んだら中断）。
             greetTimer -= dt
             let idx = Int((greetDuration - greetTimer) / 1.4) % 3
             girlDisplay = idx == 0 ? .greet : (idx == 1 ? .greet2 : .greet3)
+            let lines = ["やっほー！", "こんにちはー！", "よろしくねー！"]
+            if !isChatOpen { bubble = lines[idx] }
+            girlGreeting = true
             isBeingPatted = false
         } else if isThinking, !isHeld {
             // AIが返答を考えている間（うーん…／むむ…をゆっくり往復）。
@@ -644,6 +729,13 @@ final class AppModel: ObservableObject {
             thinkingAlt = false
             thinkingTimer = 0
             overloadPhase = 0
+            // 挨拶が終わった直後に一度だけモーションを止め、待機の吹き出しへ戻す。
+            if girlGreeting {
+                girlGreeting = false
+                if !isChatOpen, hasGirlImages {
+                    bubble = "…ぼくのこと、呼んだ？頭、撫でてくれてもいいんだよ？"
+                }
+            }
             // 発見シーケンスが中断された場合は破棄。
             if discoverTimer > 0 { discoverTimer = 0; pendingApproach = false }
         }
@@ -777,6 +869,10 @@ final class AppModel: ObservableObject {
         guard !UserDefaults.standard.bool(forKey: greetedKey) else { return }
         UserDefaults.standard.set(true, forKey: greetedKey)
         greetTimer = greetDuration
+        girlGreeting = true
+        // 既に自アプリがアクティブな時だけ、そっと前面へ。
+        // 他アプリで作業中にフォーカスを奪わないため NSApp.activate は使わない。
+        if NSApp.isActive { window?.orderFront(nil) }
     }
 
     // MARK: - 文脈の取り込み（クリップボード／スクショ）

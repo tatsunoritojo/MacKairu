@@ -23,14 +23,20 @@ struct CharacterView: View {
     var dying: Bool = false
     /// 振り回されて目を回している最中（ふらふら揺れる）。
     var dizzy: Bool = false
+    /// 初回挨拶の最中（弾んで存在感を出す）。
+    var greeting: Bool = false
 
     @State private var dyingStart: Double?
 
     var body: some View {
         TimelineView(.animation) { timeline in
             let t = timeline.date.timeIntervalSinceReferenceDate
-            let amp = swimming ? 7.0 : 4.0
-            let bob = sin(t * (swimming ? 2.6 : 1.6)) * amp
+            // 挨拶中は大きく速く弾ませて存在感を出す。
+            let amp = greeting ? 16.0 : (swimming ? 7.0 : 4.0)
+            let bobFreq = greeting ? 5.0 : (swimming ? 2.6 : 1.6)
+            // 通常は上下に揺れる。挨拶中は上方向へ跳ねる（offset +y は下向きなので負で上）。
+            let bob = greeting ? -abs(sin(t * bobFreq)) * amp : sin(t * bobFreq) * amp
+            let greetPulse = greeting ? 1 + 0.06 * sin(t * 9) : 1.0
             let blinkPhase = t.truncatingRemainder(dividingBy: 4.0)
             let isBlinking = blinkPhase < 0.15
             let swimWiggle = swimming ? sin(t * 8) * 6 : 0
@@ -58,6 +64,7 @@ struct CharacterView: View {
                     .scaleEffect(x: flip ? -1 : 1, y: 1)
                 }
             }
+            .scaleEffect(greetPulse)
             .rotationEffect(.degrees(tilt))
             .offset(y: bob * scale)
             .shadow(color: .black.opacity(0.25), radius: 6, y: 4)
