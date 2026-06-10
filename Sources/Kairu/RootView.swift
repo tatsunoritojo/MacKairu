@@ -243,6 +243,12 @@ struct ChatPanel: View {
         }
     }
 
+    /// 送信可能か。send() のガードと揃える（改行のみの入力は空とみなす／文脈があれば空でも可）。
+    private var canSend: Bool {
+        let typed = model.draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (!typed.isEmpty || model.hasContext) && !model.isThinking
+    }
+
     private var inputBar: some View {
         HStack(spacing: 6) {
             Button { model.attachClipboard() } label: {
@@ -256,22 +262,28 @@ struct ChatPanel: View {
             .buttonStyle(.plain)
             .help("スクショで質問")
 
-            TextField("質問を入力…", text: $model.draft, axis: .vertical)
+            TextField("質問を入力…（Shift+Enter で改行）", text: $model.draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .lineLimit(1...4)
                 .focused($inputFocused)
-                .onSubmit { model.send() }
+                // onSubmit に頼らず、キー入力側で明示分岐する。
+                // Return=送信／Shift+Return=改行（後者はフィールド既定の挿入に委ねてカーソル位置を保つ）。
+                .onKeyPress(keys: [.return]) { press in
+                    if press.modifiers.contains(.shift) { return .ignored }
+                    model.send()
+                    return .handled
+                }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 7)
                 .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
             Button { model.send() } label: {
                 Image(systemName: "arrow.up.circle.fill")
                     .font(.system(size: 22))
-                    .foregroundStyle(model.draft.isEmpty ? .secondary : Color.accentColor)
+                    .foregroundStyle(canSend ? Color.accentColor : .secondary)
             }
             .buttonStyle(.plain)
-            .disabled(model.draft.trimmingCharacters(in: .whitespaces).isEmpty || model.isThinking)
+            .disabled(!canSend)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
