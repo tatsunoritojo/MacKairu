@@ -225,6 +225,41 @@ final class AppModel: ObservableObject {
 
     var currentTargetSize: NSSize { isChatOpen ? openSize : closedSize }
 
+    // MARK: - 当たり判定ゾーン（キャラ実寸基準）
+
+    /// 頭/体の当たり判定ゾーン。ウィンドウ・ローカル座標（左上原点・y 下向き）で返す。
+    /// キャラは `dolphinSide` の正方形として右下寄せ＋パディング `Self.contentPad` で描画されるので、
+    /// ウィンドウ枠の割合ではなくキャラ実寸から導出する。これでスケール変更に当たり判定が追従する。
+    struct GirlZone {
+        var center: CGPoint   // ローカル座標（左上原点）
+        var rx: CGFloat
+        var ry: CGFloat
+    }
+
+    /// RootView の外周パディング。当たり判定の右下基準に使う。
+    private static let contentPad: CGFloat = 12
+    /// 頭ゾーン: 正方形上端からの中心 Y 位置・楕円半径（いずれも side に対する割合・実機調整値）。
+    private static let headCenterYFrac: CGFloat = 0.30
+    private static let headRadiusXFrac: CGFloat = 0.42
+    private static let headRadiusYFrac: CGFloat = 0.30
+
+    /// キャラ正方形（ローカル座標・左上原点）。右下寄せ＋パディング。
+    func girlCharSquare(windowSize: CGSize) -> CGRect {
+        let s = dolphinSide
+        let x = windowSize.width - Self.contentPad - s
+        let y = windowSize.height - Self.contentPad - s
+        return CGRect(x: x, y: y, width: s, height: s)
+    }
+
+    /// 頭の当たり判定ゾーン（ローカル座標）。キャラ正方形の上部中央付近。
+    func girlHeadZone(windowSize: CGSize) -> GirlZone {
+        let sq = girlCharSquare(windowSize: windowSize)
+        let s = sq.width
+        return GirlZone(center: CGPoint(x: sq.midX, y: sq.minY + s * Self.headCenterYFrac),
+                        rx: s * Self.headRadiusXFrac,
+                        ry: s * Self.headRadiusYFrac)
+    }
+
     func reloadConfig() {
         config = AppConfig.load()
         if config?.hasKey == true {
@@ -524,16 +559,20 @@ final class AppModel: ObservableObject {
                 if span > 0.01 { speed = hypot(m.x - first.p.x, m.y - first.p.y) / CGFloat(span) }
             }
             let f = window.frame
-            // 頭の当たり判定（横長楕円）。撫でやすいよう頭〜上半身を広めにカバー。
-            let hx = f.midX, hy = f.maxY - f.height * 0.22
-            let rx = f.width * 0.42, ry = f.height * 0.24
-            let nx = (m.x - hx) / rx, ny = (m.y - hy) / ry
+            // 頭の当たり判定（横長楕円）。キャラ実寸（dolphinSide）と右下固定配置から導出。
+            // ゾーンはローカル座標（左上原点）。スクリーン座標（左下原点）へ変換して判定する。
+            let zone = girlHeadZone(windowSize: f.size)
+            let hx = f.minX + zone.center.x          // ローカル x → スクリーン x
+            let hy = f.maxY - zone.center.y          // ローカル y(下向き) → スクリーン y(上向き)
+            let nx = (m.x - hx) / zone.rx, ny = (m.y - hy) / zone.ry
             inZone = (nx * nx + ny * ny) <= 1
             // 頭付近での左右の揺れ（撫でっぽさ）。
             let xs = mouseHistory.map { $0.p.x }
             xWobble = (xs.max() ?? 0) - (xs.min() ?? 0)
-            // キャラ中心からカーソルまでの距離（遠い待機の判定）。
-            distance = hypot(m.x - f.midX, m.y - f.midY)
+            // キャラ中心からカーソルまでの距離（遠い待機の判定）。キャラ正方形の中心を基準にする。
+            let sq = girlCharSquare(windowSize: f.size)
+            let charCX = f.minX + sq.midX, charCY = f.maxY - sq.midY
+            distance = hypot(m.x - charCX, m.y - charCY)
 
             // 掴み／ドラッグは handleMouseButton（イベント駆動）で更新済み。ここでは表示判定のみ。
             // 安全策: mouseUp を取りこぼしても、ボタンが上がっていれば解除する。
