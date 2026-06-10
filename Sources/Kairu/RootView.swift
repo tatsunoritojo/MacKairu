@@ -243,6 +243,15 @@ struct ChatPanel: View {
         }
     }
 
+    /// 入力欄の最大表示行数。チャット欄の高さに連動させる。
+    /// 空のときは1行のまま、打つほどこの上限まで伸びる。
+    /// 上限を chatHeight の約4分の1（おおよそ1行18pt換算）に抑え、メッセージログを圧迫しないようにする。
+    /// 下限3〜上限10行でクランプ。
+    private var inputMaxLines: Int {
+        let lines = Int((model.chatHeight * 0.25) / 18)
+        return min(10, max(3, lines))
+    }
+
     /// 送信可能か。send() のガードと揃える（改行のみの入力は空とみなす／文脈があれば空でも可）。
     private var canSend: Bool {
         let typed = model.draft.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -265,7 +274,7 @@ struct ChatPanel: View {
             TextField("質問を入力…（Shift+Enter で改行）", text: $model.draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
-                .lineLimit(1...4)
+                .lineLimit(1...inputMaxLines)
                 .focused($inputFocused)
                 // onSubmit に頼らず、キー入力側で明示分岐する。
                 // Return=送信／Shift+Return=改行（後者はフィールド既定の挿入に委ねてカーソル位置を保つ）。
