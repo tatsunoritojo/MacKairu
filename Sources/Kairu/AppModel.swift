@@ -105,6 +105,8 @@ final class AppModel: ObservableObject {
     /// 左ボタンのイベント監視（掴み/ドラッグ検出）。
     private var btnMonitorGlobal: Any?
     private var btnMonitorLocal: Any?
+    /// スクロールでのサイズ調整の監視（チャット入力待ち中にキャラ上で有効）。
+    private var scrollMonitorLocal: Any?
     /// 振り回し量の累積（方向転換×移動量）。閾値超で目を回す。
     private var whirlScore: Double = 0
     private var lastWhirlPos: NSPoint?
@@ -244,7 +246,8 @@ final class AppModel: ObservableObject {
     private static let headRadiusYFrac: CGFloat = 0.30
 
     /// キャラ正方形（ローカル座標・左上原点）。右下寄せ＋パディング。
-    func girlCharSquare(windowSize: CGSize) -> CGRect {
+    /// 頭の当たり判定とスクロールでのサイズ調整のホバー判定で共有する。
+    func characterSquare(windowSize: CGSize) -> CGRect {
         let s = dolphinSide
         let x = windowSize.width - Self.contentPad - s
         let y = windowSize.height - Self.contentPad - s
@@ -253,11 +256,20 @@ final class AppModel: ObservableObject {
 
     /// 頭の当たり判定ゾーン（ローカル座標）。キャラ正方形の上部中央付近。
     func girlHeadZone(windowSize: CGSize) -> GirlZone {
-        let sq = girlCharSquare(windowSize: windowSize)
+        let sq = characterSquare(windowSize: windowSize)
         let s = sq.width
         return GirlZone(center: CGPoint(x: sq.midX, y: sq.minY + s * Self.headCenterYFrac),
                         rx: s * Self.headRadiusXFrac,
                         ry: s * Self.headRadiusYFrac)
+    }
+
+    /// キャラの当たり矩形（スクリーン座標・左下原点）。スクロールでのサイズ調整のホバー判定に使う。
+    func characterScreenRect() -> CGRect? {
+        guard let f = window?.frame else { return nil }
+        let sq = characterSquare(windowSize: f.size)   // ローカル（左上原点）
+        // ローカル → スクリーン（左下原点）。sq.maxY が下端、sq.minY が上端。
+        return CGRect(x: f.minX + sq.minX, y: f.maxY - sq.maxY,
+                      width: sq.width, height: sq.height)
     }
 
     func reloadConfig() {
@@ -317,6 +329,28 @@ final class AppModel: ObservableObject {
         pinchStart = nil
         UserDefaults.standard.set(dolphinScale, forKey: scaleKey)
         saveOrigin()
+    }
+
+    /// スクロールでのサイズ調整を有効化（アプリ起動時に一度だけ）。
+    /// チャット入力待ち（チャットを開いている）かつカーソルがキャラの上にある時だけ、
+    /// スクロール量に連動して倍率を変える。メッセージリスト上のスクロールは妨げない。
+    func startScrollResize() {
+        guard scrollMonitorLocal == nil else { return }
+        scrollMonitorLocal = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] e in
+            guard let self else { return e }
+            guard self.isChatOpen,
+                  let rect = self.characterScreenRect(),
+                  rect.contains(NSEvent.mouseLocation) else { return e }
+            // トラックパッドはピクセル精度、マウスホイールはライン単位。どちらも scrollingDeltaY を使う。
+            let delta = e.scrollingDeltaY
+            guard delta != 0 else { return nil }
+            // 上スクロールで拡大。慣性で急変しないよう感度は控えめ。
+            let factor = 1 + delta * 0.004
+            self.dolphinScale = min(10.0, max(0.6, self.dolphinScale * factor))
+            UserDefaults.standard.set(self.dolphinScale, forKey: self.scaleKey)
+            self.applyWindowSize(animated: false)
+            return nil   // キャラ上のスクロールは消費し、メッセージリストへ流さない。
+        }
     }
 
     // MARK: - チャット欄のリサイズ（グリップのドラッグ）
@@ -570,7 +604,7 @@ final class AppModel: ObservableObject {
             let xs = mouseHistory.map { $0.p.x }
             xWobble = (xs.max() ?? 0) - (xs.min() ?? 0)
             // キャラ中心からカーソルまでの距離（遠い待機の判定）。キャラ正方形の中心を基準にする。
-            let sq = girlCharSquare(windowSize: f.size)
+            let sq = characterSquare(windowSize: f.size)
             let charCX = f.minX + sq.midX, charCY = f.maxY - sq.midY
             distance = hypot(m.x - charCX, m.y - charCY)
 

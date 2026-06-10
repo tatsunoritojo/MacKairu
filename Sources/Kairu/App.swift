@@ -110,6 +110,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupStatusItem()
         setupResurrection()
         model.startMischief() // 勝手に泳ぐ・話しかける
+        model.startScrollResize() // チャット入力待ち中、キャラ上スクロールでサイズ調整
     }
 
     /// 「15分ごとに復活」を初回は既定オンで有効化。以降は現在のアプリパスへ更新。
