@@ -3,11 +3,11 @@
 macOS の画面隅に常駐する、ネイティブ SwiftUI 製のデスクトップ・マスコット兼コンシェルジュ。透過・最前面・Dock 非表示で、クリックすると「Mac の操作」を答える AI チャットになる。Windows からの乗り換えユーザー向け。公開リポジトリ: github.com/tatsunoritojo/MacKairu
 
 ## 次セッション着手用
-- 現在地: UI詰め一式を `fix/girl-hitzone` で実装し main へ `--no-ff` マージ済み（マージコミット `d849a3d`、ブランチ削除済み）。内容: (1) POIN頭の当たり判定をキャラ実寸基準に、(2) チャット入力を Return=送信/Shift+Return=改行＋日本語IME変換確定を修正し入力欄を NSTextView 化（IME根本原因は Codex で特定）、(3) 入力欄を chatHeight 連動＋行幅いっぱい、(4) チャット入力待ち中にキャラ上スクロールでサイズ調整、(5) 初回あいさつ強化（吹き出し3段＋弾むモーション）。テスト58件グリーン・ビルド通過。**main は origin より ahead 10 で未 push**。
-- 次アクション: `git push origin main`（Red操作のためユーザー確認後に実行）。
+- 現在地: UI詰め一式を `fix/girl-hitzone` で実装し main へ `--no-ff` マージ・**push 済み**（origin/main 同期、マージコミット `d849a3d`、ブランチ削除済み）。内容: (1) POIN頭の当たり判定をキャラ実寸基準に、(2) チャット入力を Return=送信/Shift+Return=改行＋日本語IME変換確定を修正し入力欄を NSTextView 化（IME根本原因は Codex で特定）、(3) 入力欄を chatHeight 連動＋行幅いっぱい、(4) チャット入力待ち中にキャラ上スクロールでサイズ調整、(5) 初回あいさつ強化（吹き出し3段＋弾むモーション）。テスト58件グリーン・ビルド通過。さらに `/Applications/Kairu.app`（表示名 MacKairu）へ配置し Finder/Launchpad から起動可能にした。
+- 次アクション: 残課題なし（下記フィール調整がフィードバック待ち）。
 - 参照ファイル: `Sources/Kairu/RootView.swift`（`ChatInputTextView`/`ChatInputContainerView`/`ChatInputNSTextView`/`NonInteractiveLabel`/`inputMaxLines`/`canSend`）、`Sources/Kairu/AppModel.swift`（`characterSquare`/`girlHeadZone`/`characterScreenRect`・`startScrollResize`・`tickGirl` の greet 分岐・`maybeGreet`）、`Sources/Kairu/CharacterView.swift`（`greeting` モーション）、`Sources/Kairu/App.swift`（起動時 `startScrollResize` 呼び出し）。
-- 未解決 / 別扱い: 実機フィール調整（スクロールの向き・感度 `factor = 1 + delta*0.004`／あいさつの跳ね幅／頭ゾーン値 `headCenterYFrac=0.30`等）はユーザーフィードバック待ち。検証用にローカル defaults（`character=girl`／`dolphinScale`／`girlGreetedV1` リセット）を変更したまま未復元。
-- 最終更新: 2026-06-11
+- 未解決 / 別扱い: 実機フィール調整（スクロールの向き・感度 `factor = 1 + delta*0.004`／あいさつの跳ね幅／頭ゾーン値 `headCenterYFrac=0.30`等）はユーザーフィードバック待ち。検証用にローカル defaults（`character=girl`／`dolphinScale`／`girlGreetedV1` リセット）を変更したまま未復元（起動すると POIN で立ち上がる）。`/Applications` のコピーは配置時スナップショットで、`~/MacConcierge` を再ビルドしても自動更新されない。
+- 最終更新: 2026-06-13
 
 ## 技術スタック
 
