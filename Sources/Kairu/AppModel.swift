@@ -123,12 +123,8 @@ final class AppModel: ObservableObject {
     var btnMonitorLocal: Any?
     /// スクロールでのサイズ調整の監視（チャット入力待ち中にキャラ上で有効）。
     var scrollMonitorLocal: Any?
-    /// 振り回し量の累積（方向転換×移動量）。閾値超で目を回す。
-    var whirlScore: Double = 0
-    var lastWhirlPos: NSPoint?
-    var lastWhirlAngle: Double?
-    let whirlThreshold: Double = 9      // これを超えて振り回されると目を回す
-    let whirlDecayPerSec: Double = 2.5   // 振り回しが穏やかだと冷める速さ
+    /// 振り回し量の累積（方向転換×移動量）。閾値超で目を回す。純粋ロジックは KairuCore 側。
+    var whirl = WhirlAccumulator()
     /// 目を回している残り時間（秒）と表情往復用フェーズ。
     var dizzyTimer: Double = 0
     var dizzyPhase: Double = 0

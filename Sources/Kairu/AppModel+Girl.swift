@@ -172,9 +172,7 @@ extension AppModel {
                 heldStart = ProcessInfo.processInfo.systemUptime
                 didDrag = false
                 discoverTimer = 0; pendingApproach = false // 掴んだら発見シーケンスは中断
-                whirlScore = 0
-                lastWhirlPos = NSEvent.mouseLocation
-                lastWhirlAngle = nil
+                whirl.begin(at: NSEvent.mouseLocation)
                 updateGirlCursor() // 掴んだ瞬間に closedHand へ
             }
         case .leftMouseDragged:
@@ -182,14 +180,14 @@ extension AppModel {
             // 移動が起きて初めて「ドラッグ」。ここからカーソル位置へ追従させる。
             didDrag = true
             lastDragTime = ProcessInfo.processInfo.systemUptime
-            accumulateWhirl(NSEvent.mouseLocation)
+            whirl.add(NSEvent.mouseLocation)
             followDragToCursor()
         case .leftMouseUp:
             if isHeld {
                 isHeld = false; didDrag = false; saveOrigin()
                 // 振り回しが一定以上なら、手を離したあとふらふら目を回す。
-                if whirlScore > whirlThreshold { dizzyTimer = dizzyDuration; dizzyPhase = 0 }
-                whirlScore = 0; lastWhirlPos = nil; lastWhirlAngle = nil
+                if whirl.exceedsThreshold { dizzyTimer = dizzyDuration; dizzyPhase = 0 }
+                whirl.reset()
             }
             updateGirlCursor() // 離した瞬間に openHand へ
         default:
@@ -214,23 +212,6 @@ extension AppModel {
         let px = imgLeft + CGFloat(anchor.x) * imgW
         let py = pad + side * (1 - CGFloat(anchor.y))
         window.setFrameOrigin(NSPoint(x: mouse.x - px, y: mouse.y - py))
-    }
-
-    /// ドラッグの「振り回し」量を累積する。方向転換が大きいほど・速いほど多く溜まる。
-    /// まっすぐ運ぶだけでは溜まらず、ブンブン振り回すと一気に溜まる。
-    func accumulateWhirl(_ p: NSPoint) {
-        defer { lastWhirlPos = p }
-        guard let lp = lastWhirlPos else { return }
-        let dx = p.x - lp.x, dy = p.y - lp.y
-        let dist = hypot(dx, dy)
-        guard dist > 3 else { return }
-        let angle = atan2(dy, dx)
-        if let last = lastWhirlAngle {
-            var d = abs(angle - last)
-            if d > .pi { d = 2 * .pi - d }      // 0〜π の方向転換量
-            whirlScore += Double(d) * Double(min(dist, 40)) / 40
-        }
-        lastWhirlAngle = angle
     }
 
     /// 撫で状態の更新。マウス・ウィンドウから入力を組み立て、遷移は PettingMachine に委譲する。
@@ -307,9 +288,7 @@ extension AppModel {
         }
 
         // 振り回しの累積は穏やかだと少しずつ冷める。
-        if !isHeld && whirlScore > 0 {
-            whirlScore = max(0, whirlScore - dt * whirlDecayPerSec)
-        }
+        if !isHeld { whirl.decay(dt: dt) }
 
         girlFlip = false // 既定は反転なし（発見ポーズの時だけ向きを変える）
 

@@ -173,13 +173,14 @@ extension AppModel {
     /// 画像付きメッセージ数（キャッシュ圧迫の代理指標）。
     var imageMessageCount: Int { messages.reduce(0) { $0 + ($1.image != nil ? 1 : 0) } }
 
+    /// 現在の負荷状況（閾値判定は KairuCore 側）。
+    var currentLoad: LoadAssessment {
+        LoadAssessment(memCritical: memCritical, memWarning: memWarning,
+                       footprintMB: lastFootprintMB, messageCount: messages.count,
+                       imageMessageCount: imageMessageCount)
+    }
     /// 高負荷（パニック寄り）か。
-    var loadSevere: Bool {
-        memCritical || lastFootprintMB >= 1200 || messages.count >= 80 || imageMessageCount >= 10
-    }
+    var loadSevere: Bool { currentLoad.isSevere }
     /// 何らかの負荷がかかっているか（過負荷表現を出す閾値）。
-    var isUnderLoad: Bool {
-        loadSevere || memWarning || lastFootprintMB >= 700
-            || messages.count >= 40 || imageMessageCount >= 5
-    }
+    var isUnderLoad: Bool { currentLoad.isUnderLoad }
 }
