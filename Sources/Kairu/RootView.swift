@@ -323,7 +323,10 @@ private struct ChatInputTextView: NSViewRepresentable {
         nsView.textView.onSubmit = onSubmit
         nsView.textView.font = .systemFont(ofSize: 13)
         nsView.placeholderLabel.font = .systemFont(ofSize: 13)
-        if nsView.textView.string != text {
+        // IME変換中（未確定マークテキストあり）は .string を書き戻さない。
+        // ここで上書きすると変換セッションが破棄され、全角（日本語）入力が始められなくなる。
+        // 確定は textDidChange 経由で text に反映されるので、確定後の再評価で同期は追いつく。
+        if !nsView.textView.hasMarkedText(), nsView.textView.string != text {
             nsView.textView.string = text
         }
         nsView.updatePlaceholder()
