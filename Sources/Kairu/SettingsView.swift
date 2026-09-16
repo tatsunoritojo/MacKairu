@@ -19,6 +19,7 @@ struct SettingsView: View {
     @State private var annoy = true
     @State private var nade = true
     @State private var saved = false
+    @State private var saveError: String?
 
     private var effectiveModel: String {
         let m = modelTag == customTag
@@ -134,7 +135,11 @@ struct SettingsView: View {
                     .font(.system(size: 12, weight: .semibold))
             }
             .onChange(of: resurrect) { _, on in
-                if on { LaunchAgent.enable() } else { LaunchAgent.disable() }
+                if on {
+                    resurrect = LaunchAgent.enable()
+                } else {
+                    LaunchAgent.disable()
+                }
             }
             Text("オンにすると、終了しても 15 分以内にまた現れます（ログイン時にも自動起動）。")
                 .font(.system(size: 10))
@@ -204,18 +209,26 @@ struct SettingsView: View {
     }
 
     private var footer: some View {
-        HStack {
-            Button("終了") { KairuQuit.request() }
-                .font(.system(size: 11))
-            if saved {
-                Label("保存しました", systemImage: "checkmark.circle.fill")
-                    .font(.system(size: 11)).foregroundStyle(.green)
+        VStack(alignment: .leading, spacing: 8) {
+            if let saveError {
+                Text(saveError)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            Spacer()
-            Button("保存して使う") { save() }
-                .keyboardShortcut(.return)
-                .buttonStyle(.borderedProminent)
-                .disabled(apiKey.trimmingCharacters(in: .whitespaces).isEmpty)
+            HStack {
+                Button("終了") { KairuQuit.request() }
+                    .font(.system(size: 11))
+                if saved && saveError == nil {
+                    Label("保存しました", systemImage: "checkmark.circle.fill")
+                        .font(.system(size: 11)).foregroundStyle(.green)
+                }
+                Spacer()
+                Button("保存して使う") { save() }
+                    .keyboardShortcut(.return)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(apiKey.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
         }
     }
 
@@ -248,9 +261,16 @@ struct SettingsView: View {
             apiKey: apiKey.trimmingCharacters(in: .whitespacesAndNewlines),
             model: effectiveModel,
             systemPrompt: prompt.isEmpty ? AppConfig.defaultSystemPrompt : prompt)
-        cfg.save()
-        model.reloadConfig()
-        saved = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { onSaved() }
+        do {
+            try cfg.save()
+            model.reloadConfig()
+            saveError = nil
+            saved = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { onSaved() }
+        } catch {
+            saved = false
+            let detail = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            saveError = "保存に失敗しました。\(detail)"
+        }
     }
 }

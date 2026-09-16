@@ -1,9 +1,11 @@
 import Foundation
+import KairuCore
 
 /// 「消えても15分ごとに復活する」ための launchd ユーザーエージェント管理。
 /// `open -g -a <Kairu.app>` を 15 分間隔で実行する。すでに起動中なら再アクティブ化だけ（重複起動しない）。
 enum LaunchAgent {
     static let label = "com.tatsu.kairu.resurrect"
+    static let installedAppPath = "/Applications/Kairu.app"
 
     static var plistURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
@@ -15,16 +17,24 @@ enum LaunchAgent {
         FileManager.default.fileExists(atPath: plistURL.path)
     }
 
-    /// 有効化（plist を現在のアプリパスで書き出し、launchd に登録）。
-    static func enable() {
+    /// 有効化（インストール版を優先して plist を書き出し、launchd に登録）。
+    @discardableResult
+    static func enable() -> Bool {
+        guard let appPath = LaunchTarget.preferredAppPath(
+            installedAppPath: installedAppPath,
+            currentBundlePath: Bundle.main.bundlePath,
+            installedAppExists: FileManager.default.fileExists(atPath: installedAppPath)) else {
+            return false
+        }
         let dir = plistURL.deletingLastPathComponent()
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        try? plistXML(appPath: Bundle.main.bundlePath)
+        try? plistXML(appPath: appPath)
             .write(to: plistURL, atomically: true, encoding: .utf8)
         let domain = "gui/\(getuid())"
         // 既存があれば一度解除してから登録（冪等にする）。
         launchctl(["bootout", domain, plistURL.path])
         launchctl(["bootstrap", domain, plistURL.path])
+        return true
     }
 
     /// 無効化（登録解除して plist を削除）。

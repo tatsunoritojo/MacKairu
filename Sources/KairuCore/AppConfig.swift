@@ -95,22 +95,64 @@ public struct AppConfig: Codable, Equatable, Sendable {
             cfg.apiKey = saved
         } else if !cfg.apiKey.isEmpty {
             // 旧形式（config.json に平文）から credentials.json へ移行し、平文を消す。
-            Credentials.set(cfg.apiKey, for: cfg.provider)
-            cfg.save()
+            // 起動時の移行はベストエフォート（ユーザー保存は SettingsView がエラーを出す）。
+            try? Credentials.set(cfg.apiKey, for: cfg.provider)
+            try? cfg.save()
         }
         return cfg
     }
 
     /// 保存する。API キーは credentials.json（権限 0600）、それ以外を config.json へ。
-    public func save() {
-        Credentials.set(apiKey, for: provider)
-        let url = AppConfig.fileURL
-        try? FileManager.default.createDirectory(
-            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    /// どちらかが失敗したら throw し、後段失敗時は設定本体を元へ戻す。
+    public func save() throws {
+        try save(to: AppConfig.fileURL, credentialsURL: Credentials.fileURL)
+    }
+
+    /// 指定 URL に保存する（テスト用。実秘密ファイルを触らない）。
+    func save(to configURL: URL, credentialsURL: URL) throws {
+        let dir = configURL.deletingLastPathComponent()
+        do {
+            try FileManager.default.createDirectory(
+                at: dir, withIntermediateDirectories: true)
+        } catch {
+            throw PersistenceError.createDirectory(dir.path)
+        }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .withoutEscapingSlashes]
-        if let data = try? encoder.encode(sanitizedForDisk()) {
-            try? data.write(to: url)
+        let data: Data
+        do {
+            data = try encoder.encode(sanitizedForDisk())
+        } catch {
+            throw PersistenceError.encode
+        }
+        var isDirectory: ObjCBool = false
+        let configExists = FileManager.default.fileExists(
+            atPath: configURL.path, isDirectory: &isDirectory)
+        let previousConfig: Data?
+        if configExists && !isDirectory.boolValue {
+            do {
+                previousConfig = try Data(contentsOf: configURL)
+            } catch {
+                throw PersistenceError.read(configURL.path)
+            }
+        } else {
+            previousConfig = nil
+        }
+        do {
+            try data.write(to: configURL, options: .atomic)
+        } catch {
+            throw PersistenceError.write(configURL.path)
+        }
+        do {
+            try Credentials.set(apiKey, for: provider, at: credentialsURL)
+        } catch {
+            // 2ファイルを同時更新できないため、後段失敗時は設定本体を元へ戻す。
+            if let previousConfig {
+                try? previousConfig.write(to: configURL, options: .atomic)
+            } else {
+                try? FileManager.default.removeItem(at: configURL)
+            }
+            throw error
         }
     }
 
@@ -123,6 +165,6 @@ public struct AppConfig: Codable, Equatable, Sendable {
         let example = AppConfig(
             provider: .claude, apiKey: "",
             model: Provider.claude.defaultModel, systemPrompt: defaultSystemPrompt)
-        example.save()
+        try? example.save()
     }
 }

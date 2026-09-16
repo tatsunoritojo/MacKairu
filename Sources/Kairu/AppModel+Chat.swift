@@ -96,13 +96,14 @@ extension AppModel {
     // MARK: - メッセージ送信
 
     func send() {
+        let originalDraft = draft
         let typed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         // 取り込み中の文脈があれば、入力が空でも送れる（クイック操作用）。
         guard (!typed.isEmpty || hasContext), !isThinking else { return }
-        draft = ""
 
         // ネットミーム: 「お前を消す方法」（文脈の有無に関わらず生入力で判定）。
         if SelfDestruct.isTriggered(by: typed) {
+            draft = ""
             messages.append(ChatMessage(role: .user, text: typed))
             if character == .girl, girlImages[.sad] != nil {
                 // 裏モード: 悲しい顔でブルブル震えながら 5 秒かけてフェードアウト。
@@ -124,13 +125,22 @@ extension AppModel {
 
         // 裏モードの呪文。
         if SecretMode.isTriggered(by: typed) {
+            draft = ""
             messages.append(ChatMessage(role: .user, text: typed))
             toggleSecretMode()
             clearPending()
             return
         }
 
+        guard let config else {
+            bubble = "設定が読み込めません。\(character.emoji)→「設定…」から API キーを入れてください。"
+            return
+        }
+
         // 取り込んだテキスト／画像を、ユーザーメッセージに合成する。
+        let originalPendingText = pendingText
+        let originalPendingImage = pendingImage
+        let originalPendingImagePreview = pendingImagePreview
         var text = typed
         if let ctx = pendingText {
             let q = typed.isEmpty ? "これについて教えて。" : typed
@@ -139,7 +149,9 @@ extension AppModel {
             text = "この画面について、何ができるか・どう操作するか教えて。"
         }
         let image = pendingImage
-        messages.append(ChatMessage(role: .user, text: text, image: image))
+        let sentMessage = ChatMessage(role: .user, text: text, image: image)
+        draft = ""
+        messages.append(sentMessage)
         clearPending()
 
         // 心無い言葉の判定。明白な語はキーワードで即反応（遅延ゼロ）。
@@ -150,20 +162,20 @@ extension AppModel {
             hurtRegisteredForSend = true
         }
 
-        guard let config else {
-            messages.append(ChatMessage(role: .assistant,
-                text: "設定が読み込めません。\(character.emoji)→「設定…」から API キーを入れてください。"))
-            return
-        }
         isThinking = true
+        bubble = nil
+        chatError = nil
+        let requestID = chatRequestGate.begin()
         // 裏モード（POIN）のときは少女の人格プロンプトに差し替える。
         var requestConfig = config
         if character == .girl { requestConfig.systemPrompt = AppConfig.girlSystemPrompt }
         let client = AIClient(config: requestConfig)
         let history = messages
-        Task {
+        chatTask = Task { [weak self] in
+            guard let self else { return }
             do {
                 var reply = try await client.send(history: history)
+                guard self.chatRequestGate.isCurrent(requestID) else { return }
                 // 裏モードは返答末尾の気分タグを読み取り、表示からは消す。
                 var hurt = false
                 if self.character == .girl {
@@ -174,12 +186,24 @@ extension AppModel {
                 // POIN 自身が「傷ついた」と示したら悲しくなる（キーワード未検知時のみ）。
                 if hurt, !self.hurtRegisteredForSend { self.registerHurt() }
             } catch {
+                guard self.chatRequestGate.isCurrent(requestID) else { return }
+                // 新しい下書きや添付が無い場合だけ、失敗した送信を入力欄へ丸ごと戻す。
+                // 新しい入力がある場合は、元メッセージを履歴に残して消失を防ぐ。
+                if self.draft.isEmpty && !self.hasContext {
+                    self.messages.removeAll { $0.id == sentMessage.id }
+                    self.draft = originalDraft
+                    self.pendingText = originalPendingText
+                    self.pendingImage = originalPendingImage
+                    self.pendingImagePreview = originalPendingImagePreview
+                }
                 let msg = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-                self.messages.append(ChatMessage(role: .assistant, text: "⚠️ \(msg)"))
+                self.chatError = "送信に失敗しました。\(msg)"
                 // 処理失敗・エラーでも悲しい顔になる（撫でて慰めると戻る）。
                 self.enterSad()
             }
+            guard self.chatRequestGate.finish(requestID) else { return }
             self.isThinking = false
+            self.chatTask = nil
         }
     }
 }

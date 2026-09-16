@@ -20,8 +20,14 @@ final class AppModel: ObservableObject {
     @Published var draft: String = ""
     @Published var isChatOpen = false
     @Published var isThinking = false
+    /// チャットを開いたまま確認でき、API履歴には混ぜない送信エラー。
+    @Published var chatError: String?
     /// 吹き出しに出す一言（アイドル時のヒントやエラー表示）。
     @Published var bubble: String? = "やあ！Mac のことなら何でも聞いてね"
+    /// 履歴クリア後に古い応答を混入させないための世代管理。
+    var chatRequestGate = ChatRequestGate()
+    /// 履歴クリア時に通信自体も止める。
+    var chatTask: Task<Void, Never>?
 
     // MARK: - キャラクター表示
 

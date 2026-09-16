@@ -75,6 +75,15 @@ struct ChatPanel: View {
                 Divider().opacity(0.4)
                 contextBar
             }
+            if let chatError = model.chatError {
+                Divider().opacity(0.4)
+                Text(chatError)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 10)
+                    .padding(.top, 7)
+            }
             Divider().opacity(0.4)
             inputBar
         }
@@ -124,7 +133,7 @@ struct ChatPanel: View {
             }
             .buttonStyle(.plain)
             .help("履歴をクリア（スリムに戻る）")
-            .disabled(model.messages.isEmpty)
+            .disabled(model.messages.isEmpty || model.isThinking)
 
             Button { model.presentSettings?() } label: {
                 Image(systemName: "gearshape.fill").foregroundStyle(.secondary)

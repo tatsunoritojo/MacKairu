@@ -180,7 +180,12 @@ extension AppModel {
 
     /// 履歴をクリアしてスリムに戻す。
     func clearChat() {
+        chatRequestGate.invalidate()
+        chatTask?.cancel()
+        chatTask = nil
+        isThinking = false
         messages = []
+        chatError = nil
         bubble = nil
     }
 

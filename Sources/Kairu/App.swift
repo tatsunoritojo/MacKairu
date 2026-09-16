@@ -118,18 +118,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let key = "resurrectInitialized"
         let d = UserDefaults.standard
         if !d.bool(forKey: key) {
-            LaunchAgent.enable() // 初回: 既定オン
-            d.set(true, forKey: key)
+            if LaunchAgent.enable() { d.set(true, forKey: key) } // 初回: 既定オン
         } else if LaunchAgent.isEnabled {
-            LaunchAgent.enable() // パスが変わっている場合に追従
+            LaunchAgent.enable() // インストール版のパス変更時だけ追従
         }
     }
 
     // MARK: - 終了（最優先で処理）
 
-    /// 終了「お前を消す方法」をメインメニュー（最優先コマンド）に登録。
+    /// 終了と標準 Edit をメインメニューに登録する。
+    /// Edit の target は未設定のままにし、⌘A/C/V/X/Z・⇧⌘Z を first responder へ送る。
     private func setupMainMenu() {
         let mainMenu = NSMenu()
+
         let appItem = NSMenuItem()
         let appMenu = NSMenu()
         let quitItem = NSMenuItem(title: "終了", action: #selector(quit), keyEquivalent: "q")
@@ -137,6 +138,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appMenu.addItem(quitItem)
         appItem.submenu = appMenu
         mainMenu.addItem(appItem)
+
+        let editItem = NSMenuItem()
+        let editMenu = NSMenu(title: "編集")
+        editMenu.addItem(NSMenuItem(title: "元に戻す", action: Selector(("undo:")), keyEquivalent: "z"))
+        let redoItem = NSMenuItem(title: "やり直す", action: Selector(("redo:")), keyEquivalent: "z")
+        redoItem.keyEquivalentModifierMask = [.command, .shift]
+        editMenu.addItem(redoItem)
+        editMenu.addItem(.separator())
+        editMenu.addItem(NSMenuItem(title: "カット", action: #selector(NSText.cut(_:)), keyEquivalent: "x"))
+        editMenu.addItem(NSMenuItem(title: "コピー", action: #selector(NSText.copy(_:)), keyEquivalent: "c"))
+        editMenu.addItem(NSMenuItem(title: "ペースト", action: #selector(NSText.paste(_:)), keyEquivalent: "v"))
+        editMenu.addItem(NSMenuItem(title: "すべてを選択", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"))
+        editItem.submenu = editMenu
+        mainMenu.addItem(editItem)
+
         NSApp.mainMenu = mainMenu
     }
 
