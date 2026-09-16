@@ -23,6 +23,37 @@ final class WindowPlacementTests: XCTestCase {
         XCTAssertEqual(result.origin, CGPoint(x: -1200, y: 500))
     }
 
+    func testFullyVisibleWindowSpanningAdjacentDisplaysKeepsItsPosition() {
+        let right = CGRect(x: 1440, y: 0, width: 1440, height: 900)
+        let frame = CGRect(x: 1300, y: 200, width: 300, height: 220)
+
+        let result = WindowPlacement.constrainedFrame(
+            frame, visibleFrames: [main, right], keepTopVisible: false)
+
+        XCTAssertEqual(result, frame)
+    }
+
+    func testSeparateSpacesConstrainsSpanningWindowToOneDisplay() {
+        let right = CGRect(x: 1440, y: 0, width: 1440, height: 900)
+        let frame = CGRect(x: 1300, y: 200, width: 300, height: 220)
+
+        let result = WindowPlacement.constrainedFrame(
+            frame, visibleFrames: [main, right], keepTopVisible: false,
+            allowSpanningDisplays: false)
+
+        XCTAssertEqual(result.origin.x, 1440)
+    }
+
+    func testOverlappingDisplaysDoNotHidePartiallyOffscreenWindow() {
+        let mirrored = CGRect(x: 0, y: 0, width: 1440, height: 900)
+        let frame = CGRect(x: 1300, y: 200, width: 280, height: 220)
+
+        let result = WindowPlacement.constrainedFrame(
+            frame, visibleFrames: [main, mirrored], keepTopVisible: false)
+
+        XCTAssertEqual(result.maxX, main.maxX)
+    }
+
     func testOversizedOpenWindowKeepsTopAndRightControlsVisible() {
         let frame = CGRect(x: 100, y: 100, width: 1800, height: 1200)
 

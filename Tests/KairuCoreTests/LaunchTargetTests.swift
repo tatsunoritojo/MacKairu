@@ -28,4 +28,16 @@ final class LaunchTargetTests: XCTestCase {
 
         XCTAssertEqual(path, "/Applications/Kairu Preview.app")
     }
+
+    func testInstalledAppCanConfigureItsOwnAgent() {
+        XCTAssertTrue(LaunchTarget.shouldConfigureAgent(
+            currentBundlePath: "/Applications/Kairu.app",
+            preferredAppPath: "/Applications/Kairu.app"))
+    }
+
+    func testDevelopmentCopyDoesNotConfigureInstalledAppAgent() {
+        XCTAssertFalse(LaunchTarget.shouldConfigureAgent(
+            currentBundlePath: "/private/tmp/Kairu-QA.app",
+            preferredAppPath: "/Applications/Kairu.app"))
+    }
 }

@@ -38,6 +38,18 @@ struct RootView: View {
                         .onEnded { _ in model.pinchEnded() }
                 )
                 .help("クリックで質問 / ドラッグで移動 / ピンチで大きさ変更")
+                .accessibilityElement()
+                .accessibilityLabel("MacKairuのキャラクター")
+                .accessibilityHint("実行するとチャットを開閉します。値の調整で大きさを変更できます")
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAction { model.toggleChat() }
+                .accessibilityAdjustableAction { direction in
+                    switch direction {
+                    case .increment: model.setScale(model.dolphinScale + 0.1)
+                    case .decrement: model.setScale(model.dolphinScale - 0.1)
+                    @unknown default: break
+                    }
+                }
         }
         .padding(12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
@@ -119,6 +131,17 @@ struct ChatPanel: View {
                     .onEnded { _ in model.chatResizeEnded() }
             )
             .help("ドラッグでチャット欄の大きさを変更")
+            .accessibilityLabel("チャット欄のサイズ")
+            .accessibilityHint("値を調整すると縦横を20ポイントずつ変更します")
+            .accessibilityAdjustableAction { direction in
+                model.chatResizeBegan()
+                switch direction {
+                case .increment: model.chatResizeChanged(dx: 20, dy: 20)
+                case .decrement: model.chatResizeChanged(dx: -20, dy: -20)
+                @unknown default: break
+                }
+                model.chatResizeEnded()
+            }
     }
 
     private var header: some View {
@@ -132,14 +155,16 @@ struct ChatPanel: View {
                 Image(systemName: "trash").foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
-            .help("履歴をクリア（スリムに戻る）")
-            .disabled(model.messages.isEmpty || model.isThinking)
+            .help(model.isThinking ? "応答を中止して履歴をクリア" : "履歴をクリア（スリムに戻る）")
+            .accessibilityLabel(model.isThinking ? "応答を中止して履歴をクリア" : "履歴をクリア")
+            .disabled(model.messages.isEmpty)
 
             Button { model.presentSettings?() } label: {
                 Image(systemName: "gearshape.fill").foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
             .help("設定（API キー）")
+            .accessibilityLabel("設定を開く")
 
             // ウィンドウ内からの終了（おせっかいモード時は引き止められる）
             Button { KairuQuit.request() } label: {
@@ -147,6 +172,7 @@ struct ChatPanel: View {
             }
             .buttonStyle(.plain)
             .help("終了")
+            .accessibilityLabel("MacKairuを終了")
 
             Button {
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { model.toggleChat() }
@@ -154,6 +180,7 @@ struct ChatPanel: View {
                 Image(systemName: "chevron.down.circle.fill").foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("チャットを閉じる")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -221,6 +248,7 @@ struct ChatPanel: View {
                         Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("取り込み中の内容を削除")
                 }
                 // クイック操作
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -275,11 +303,13 @@ struct ChatPanel: View {
             }
             .buttonStyle(.plain)
             .help("クリップボードを取り込む")
+            .accessibilityLabel("クリップボードを取り込む")
             Button { model.captureScreenshot() } label: {
                 Image(systemName: "camera.viewfinder").foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
             .help("スクショで質問")
+            .accessibilityLabel("スクリーンショットを取り込む")
 
             ChatInputTextView(
                 text: $model.draft,
@@ -301,6 +331,7 @@ struct ChatPanel: View {
             }
             .buttonStyle(.plain)
             .disabled(!canSend)
+            .accessibilityLabel("送信")
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)

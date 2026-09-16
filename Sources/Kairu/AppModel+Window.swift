@@ -94,7 +94,8 @@ extension AppModel {
         let newFrame = WindowPlacement.constrainedFrame(
             proposed,
             visibleFrames: NSScreen.screens.map(\.visibleFrame),
-            keepTopVisible: isChatOpen)
+            keepTopVisible: isChatOpen,
+            allowSpanningDisplays: !NSScreen.screensHaveSeparateSpaces)
         window.setFrame(newFrame, display: true, animate: animated)
         saveOrigin()
     }
@@ -105,7 +106,8 @@ extension AppModel {
         let constrained = WindowPlacement.constrainedFrame(
             window.frame,
             visibleFrames: NSScreen.screens.map(\.visibleFrame),
-            keepTopVisible: isChatOpen)
+            keepTopVisible: isChatOpen,
+            allowSpanningDisplays: !NSScreen.screensHaveSeparateSpaces)
         guard constrained != window.frame else { return }
         window.setFrame(constrained, display: true)
         saveOrigin()

@@ -20,12 +20,39 @@ struct SettingsView: View {
     @State private var nade = true
     @State private var saved = false
     @State private var saveError: String?
+    @State private var resurrectError: String?
 
     private var effectiveModel: String {
         let m = modelTag == customTag
             ? customModel.trimmingCharacters(in: .whitespacesAndNewlines)
             : modelTag
         return m.isEmpty ? provider.defaultModel : m
+    }
+
+    /// ユーザー操作による変更だけモデル候補をリセットし、設定読込では保存値を保つ。
+    private var providerBinding: Binding<Provider> {
+        Binding(
+            get: { provider },
+            set: { newValue in
+                provider = newValue
+                modelTag = newValue.models.first ?? customTag
+                customModel = ""
+                apiKey = Credentials.get(for: newValue) ?? ""
+            })
+    }
+
+    /// LaunchAgent操作と表示値の同期を1回のsetter内で完結させる。
+    private var resurrectBinding: Binding<Bool> {
+        Binding(
+            get: { resurrect },
+            set: { requested in
+                let succeeded = requested ? LaunchAgent.enable() : LaunchAgent.disable()
+                let actual = LaunchAgent.isEnabled
+                resurrect = actual
+                resurrectError = succeeded && actual == requested
+                    ? nil
+                    : "自動起動の設定を変更できませんでした。Applicationsフォルダのインストール版から再試行してください。"
+            })
     }
 
     var body: some View {
@@ -51,16 +78,11 @@ struct SettingsView: View {
     private var providerSection: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("AI プロバイダ").font(.system(size: 12, weight: .semibold))
-            Picker("", selection: $provider) {
+            Picker("", selection: providerBinding) {
                 ForEach(Provider.allCases) { p in Text(p.label).tag(p) }
             }
             .labelsHidden()
             .pickerStyle(.segmented)
-            .onChange(of: provider) { _, newValue in
-                modelTag = newValue.models.first ?? customTag
-                customModel = ""
-                apiKey = Credentials.get(for: newValue) ?? ""
-            }
         }
     }
 
@@ -130,20 +152,20 @@ struct SettingsView: View {
 
     private var resurrectSection: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Toggle(isOn: $resurrect) {
+            Toggle(isOn: resurrectBinding) {
                 Text("消えても15分ごとに復活する（しつこいカイル）")
                     .font(.system(size: 12, weight: .semibold))
             }
-            .onChange(of: resurrect) { _, on in
-                if on {
-                    resurrect = LaunchAgent.enable()
-                } else {
-                    LaunchAgent.disable()
-                }
-            }
+            .disabled(!LaunchAgent.canConfigureFromCurrentBundle)
             Text("オンにすると、終了しても 15 分以内にまた現れます（ログイン時にも自動起動）。")
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
+            if let resurrectError {
+                Text(resurrectError)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
@@ -227,12 +249,15 @@ struct SettingsView: View {
                 Button("保存して使う") { save() }
                     .keyboardShortcut(.return)
                     .buttonStyle(.borderedProminent)
-                    .disabled(apiKey.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
     }
 
     private func loadCurrent() {
+        saved = false
+        saveError = nil
+        resurrectError = nil
         resurrect = LaunchAgent.isEnabled
         let d = UserDefaults.standard
         annoy = d.object(forKey: "annoyMode") == nil ? true : d.bool(forKey: "annoyMode")

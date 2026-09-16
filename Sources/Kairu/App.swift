@@ -119,6 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// 「15分ごとに復活」を初回は既定オンで有効化。以降は現在のアプリパスへ更新。
     private func setupResurrection() {
+        guard LaunchAgent.canConfigureFromCurrentBundle else { return }
         let key = "resurrectInitialized"
         let d = UserDefaults.standard
         if !d.bool(forKey: key) {
@@ -163,7 +164,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// ⌘Q をアプリ最上位で横取り。入力欄（SecureField 等）より先に処理する。
     private func setupQuitMonitor() {
         quitMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            if event.modifierFlags.contains(.command),
+            let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            if modifiers == .command,
                event.charactersIgnoringModifiers?.lowercased() == "q" {
                 DispatchQueue.main.async { KairuQuit.request() }
                 return nil
@@ -274,6 +276,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                        onSaved: { [weak self] in self?.settingsWindow?.close() }))
             w.center()
             settingsWindow = w
+        } else if settingsWindow?.isVisible == false {
+            // 閉じる前の未保存キーや古い成功・失敗表示を次回へ持ち越さない。
+            settingsWindow?.contentView = NSHostingView(
+                rootView: SettingsView(model: model,
+                                       onSaved: { [weak self] in self?.settingsWindow?.close() }))
         }
         NSApp.activate(ignoringOtherApps: true)
         settingsWindow?.makeKeyAndOrderFront(nil)

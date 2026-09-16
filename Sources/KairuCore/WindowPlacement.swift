@@ -6,8 +6,10 @@ public enum WindowPlacement {
     public static func constrainedFrame(
         _ frame: CGRect,
         visibleFrames: [CGRect],
-        keepTopVisible: Bool
+        keepTopVisible: Bool,
+        allowSpanningDisplays: Bool = true
     ) -> CGRect {
+        if allowSpanningDisplays, isFullyCovered(frame, by: visibleFrames) { return frame }
         guard let screen = targetScreen(for: frame, visibleFrames: visibleFrames) else {
             return frame
         }
@@ -27,6 +29,38 @@ public enum WindowPlacement {
             result.origin.y = keepTopVisible ? screen.maxY - frame.height : screen.minY
         }
         return result
+    }
+
+    /// 重なりを二重計上せず、frame全体が画面群の可視領域で覆われているか判定する。
+    private static func isFullyCovered(_ frame: CGRect, by visibleFrames: [CGRect]) -> Bool {
+        guard frame.width > 0, frame.height > 0 else { return true }
+        let clips = visibleFrames.map { frame.intersection($0) }.filter { !$0.isNull && !$0.isEmpty }
+        let xs = Array(Set(clips.flatMap { [$0.minX, $0.maxX] })).sorted()
+        guard xs.count >= 2 else { return false }
+
+        var coveredArea: CGFloat = 0
+        for index in 0 ..< xs.count - 1 {
+            let left = xs[index], right = xs[index + 1]
+            guard right > left else { continue }
+            let intervals = clips
+                .filter { $0.minX < right && $0.maxX > left }
+                .map { ($0.minY, $0.maxY) }
+                .sorted { $0.0 < $1.0 }
+            guard var merged = intervals.first else { continue }
+            var height: CGFloat = 0
+            for interval in intervals.dropFirst() {
+                if interval.0 <= merged.1 {
+                    merged.1 = max(merged.1, interval.1)
+                } else {
+                    height += merged.1 - merged.0
+                    merged = interval
+                }
+            }
+            height += merged.1 - merged.0
+            coveredArea += (right - left) * height
+        }
+        let frameArea = frame.width * frame.height
+        return coveredArea >= frameArea - max(0.5, frameArea * 0.000_001)
     }
 
     private static func targetScreen(for frame: CGRect, visibleFrames: [CGRect]) -> CGRect? {

@@ -12,4 +12,16 @@ public enum LaunchTarget {
         guard currentBundlePath.hasPrefix("/Applications/") else { return nil }
         return currentBundlePath
     }
+
+    /// 現在実行中のアプリ自身が登録対象の時だけ、起動時の再登録を許可する。
+    /// 開発・QAコピーからインストール版をRunAtLoadすると、別プロセスが同時起動するため。
+    public static func shouldConfigureAgent(
+        currentBundlePath: String,
+        preferredAppPath: String?
+    ) -> Bool {
+        guard let preferredAppPath else { return false }
+        let current = URL(fileURLWithPath: currentBundlePath).standardizedFileURL.path
+        let preferred = URL(fileURLWithPath: preferredAppPath).standardizedFileURL.path
+        return current == preferred
+    }
 }
