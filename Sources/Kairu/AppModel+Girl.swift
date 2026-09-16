@@ -272,9 +272,11 @@ extension AppModel {
             xWobble: Double(xWobble), distance: Double(distance), enabled: enabled,
             isHeld: reportHeld, isDragging: dragging, isMoving: isSwimming))
 
-        girlState = pettingMachine.state
-        girlDisplay = pettingMachine.display
-        isBeingPatted = pettingMachine.isBeingPatted
+        if girlState != pettingMachine.state { girlState = pettingMachine.state }
+        if girlDisplay != pettingMachine.display { girlDisplay = pettingMachine.display }
+        if isBeingPatted != pettingMachine.isBeingPatted {
+            isBeingPatted = pettingMachine.isBeingPatted
+        }
 
         // 悲しい時は、撫でて慰めると泣き止む（一定時間の頭なでで復帰）。
         // チャットを開いている間は当たり判定がパネル側にズレるので、復帰させない。
@@ -290,7 +292,7 @@ extension AppModel {
         // 振り回しの累積は穏やかだと少しずつ冷める。
         if !isHeld { whirl.decay(dt: dt) }
 
-        girlFlip = false // 既定は反転なし（発見ポーズの時だけ向きを変える）
+        if girlFlip { girlFlip = false } // 既定は反転なし（発見ポーズの時だけ向きを変える）
 
         // 自己モニタリング: フットプリントを ~1.5 秒ごとにサンプリング。
         footprintTick += 1
@@ -299,17 +301,19 @@ extension AppModel {
         if isSad {
             // 悲しいは全てに優先し、撫でて慰められるまで常に悲しむ。
             sadPhase += dt
-            girlDisplay = sadPhase.truncatingRemainder(dividingBy: upsetFlip * 2) < upsetFlip
+            let display: GirlState = sadPhase.truncatingRemainder(dividingBy: upsetFlip * 2) < upsetFlip
                 ? .upset : .upset2
+            if girlDisplay != display { girlDisplay = display }
             // 慰められている時だけ手応え（ふわっと反応）を残す。
-            isBeingPatted = !isChatOpen && pettingMachine.isBeingPatted
-            girlFlip = false
+            let patted = !isChatOpen && pettingMachine.isBeingPatted
+            if isBeingPatted != patted { isBeingPatted = patted }
+            if girlFlip { girlFlip = false }
         } else if discoverTimer > 0, !isHeld, !isChatOpen {
             // 移動直前の発見ポーズ。カーソル方向を向き、知覚できる間を置いてから走り出す。
             discoverTimer -= dt
-            girlDisplay = .found
-            girlFlip = approachFlip
-            isBeingPatted = false
+            if girlDisplay != .found { girlDisplay = .found }
+            if girlFlip != approachFlip { girlFlip = approachFlip }
+            if isBeingPatted { isBeingPatted = false }
             if discoverTimer <= 0, pendingApproach {
                 pendingApproach = false
                 performSwim(goToCursor: true)
@@ -318,18 +322,20 @@ extension AppModel {
             // 手を離したあと、ふらふら目を回す（掴み直したら中断）。
             dizzyTimer -= dt
             dizzyPhase += dt
-            girlDisplay = dizzyPhase.truncatingRemainder(dividingBy: dizzyFlip * 2) < dizzyFlip
+            let display: GirlState = dizzyPhase.truncatingRemainder(dividingBy: dizzyFlip * 2) < dizzyFlip
                 ? .dizzy : .dizzy2
-            isBeingPatted = false
+            if girlDisplay != display { girlDisplay = display }
+            if isBeingPatted { isBeingPatted = false }
         } else if greetTimer > 0, !isHeld {
             // 初回起動の挨拶。3枚＋吹き出し3段を順番に見せ、弾むモーションで存在感を出す（掴んだら中断）。
             greetTimer -= dt
             let idx = Int((greetDuration - greetTimer) / 1.4) % 3
-            girlDisplay = idx == 0 ? .greet : (idx == 1 ? .greet2 : .greet3)
+            let display: GirlState = idx == 0 ? .greet : (idx == 1 ? .greet2 : .greet3)
+            if girlDisplay != display { girlDisplay = display }
             let lines = ["やっほー！", "こんにちはー！", "よろしくねー！"]
             if !isChatOpen { bubble = lines[idx] }
             girlGreeting = true
-            isBeingPatted = false
+            if isBeingPatted { isBeingPatted = false }
         } else if isThinking, !isHeld {
             // AIが返答を考えている間（うーん…／むむ…をゆっくり往復）。
             thinkingTimer -= dt
@@ -337,8 +343,9 @@ extension AppModel {
                 thinkingAlt.toggle()
                 thinkingTimer = Double.random(in: 0.9...1.5)
             }
-            girlDisplay = thinkingAlt ? .thinking2 : .thinking
-            isBeingPatted = false
+            let display: GirlState = thinkingAlt ? .thinking2 : .thinking
+            if girlDisplay != display { girlDisplay = display }
+            if isBeingPatted { isBeingPatted = false }
         } else if isChatOpen, messages.last?.role == .assistant,
                   girlState != .hold, girlState != .drag {
             // 回答を提示している間は解説ポーズ。ときどきウインク（話してる感）。
@@ -350,14 +357,16 @@ extension AppModel {
                     ? teachingWinkDuration
                     : Double.random(in: 1.8...3.6)
             }
-            girlDisplay = teachingWinking ? .teaching2 : .teaching
-            isBeingPatted = false
+            let display: GirlState = teachingWinking ? .teaching2 : .teaching
+            if girlDisplay != display { girlDisplay = display }
+            if isBeingPatted { isBeingPatted = false }
         } else if isUnderLoad, girlState == .idle, !isHeld {
             // 自己モニタリング（過負荷）: 大袈裟に ぐるぐる(build)→プシュー！(burst)。
             overloadPhase += dt
             let p = overloadPhase.truncatingRemainder(dividingBy: 1.6) // build 1.2s + burst 0.4s
-            girlDisplay = p < 1.2 ? .overload : .overload2
-            isBeingPatted = false
+            let display: GirlState = p < 1.2 ? .overload : .overload2
+            if girlDisplay != display { girlDisplay = display }
+            if isBeingPatted { isBeingPatted = false }
         } else {
             teachingWinking = false
             teachingTimer = Double.random(in: 1.8...3.6)

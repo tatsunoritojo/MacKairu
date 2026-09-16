@@ -28,9 +28,28 @@ struct CharacterView: View {
 
     @State private var dyingStart: Double?
 
+    private var needsContinuousAnimation: Bool {
+        thinking || swimming || dying || dizzy || greeting
+    }
+
     var body: some View {
-        TimelineView(.animation) { timeline in
-            let t = timeline.date.timeIntervalSinceReferenceDate
+        Group {
+            if needsContinuousAnimation {
+                TimelineView(.periodic(from: .now, by: 1.0 / 30.0)) { timeline in
+                    character(at: timeline.date.timeIntervalSinceReferenceDate)
+                }
+            } else {
+                // アイドル中は描画クロックを止め、常駐時のWindowServer負荷を抑える。
+                character(at: Double.pi / 1.6)
+            }
+        }
+        .onChange(of: dying) { _, d in
+            dyingStart = d ? Date().timeIntervalSinceReferenceDate : nil
+        }
+    }
+
+    @ViewBuilder
+    private func character(at t: Double) -> some View {
             // 挨拶中は大きく速く弾ませて存在感を出す。
             let amp = greeting ? 16.0 : (swimming ? 7.0 : 4.0)
             let bobFreq = greeting ? 5.0 : (swimming ? 2.6 : 1.6)
@@ -71,10 +90,6 @@ struct CharacterView: View {
             .animation(.spring(response: 0.4, dampingFraction: 0.7), value: fat)
             .animation(.easeInOut(duration: 0.3), value: flip)
             .animation(.easeInOut(duration: 0.25), value: character)
-            .onChange(of: dying) { _, d in
-                dyingStart = d ? Date().timeIntervalSinceReferenceDate : nil
-            }
-        }
     }
 
     /// 裏キャラ（画像＋なでなで＋終了演出）。

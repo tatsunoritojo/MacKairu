@@ -89,17 +89,25 @@ extension AppModel {
         let target = currentTargetSize
         let old = window.frame
         // 右下を基準に成長（maxX・minY を固定）。
-        var x = old.maxX - target.width
-        var y = old.minY
-        // 画面サイズ・キャラの大きさに合わせて動的調整: はみ出すなら画面内へ寄せる。
-        // チャットを開いた時や大きいキャラの時に、欄が画面外に出て見切れるのを防ぐ。
-        if let screen = window.screen ?? NSScreen.main {
-            let v = screen.visibleFrame
-            if target.width <= v.width { x = min(max(x, v.minX), v.maxX - target.width) }
-            if target.height <= v.height { y = min(max(y, v.minY), v.maxY - target.height) }
-        }
-        let newFrame = NSRect(x: x, y: y, width: target.width, height: target.height)
+        let proposed = NSRect(x: old.maxX - target.width, y: old.minY,
+                              width: target.width, height: target.height)
+        let newFrame = WindowPlacement.constrainedFrame(
+            proposed,
+            visibleFrames: NSScreen.screens.map(\.visibleFrame),
+            keepTopVisible: isChatOpen)
         window.setFrame(newFrame, display: true, animate: animated)
+        saveOrigin()
+    }
+
+    /// 保存座標やディスプレイ構成変更で画面外へ出たウィンドウを回収する。
+    func ensureWindowVisible() {
+        guard let window else { return }
+        let constrained = WindowPlacement.constrainedFrame(
+            window.frame,
+            visibleFrames: NSScreen.screens.map(\.visibleFrame),
+            keepTopVisible: isChatOpen)
+        guard constrained != window.frame else { return }
+        window.setFrame(constrained, display: true)
         saveOrigin()
     }
 

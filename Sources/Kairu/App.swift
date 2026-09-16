@@ -94,11 +94,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let v = screen.visibleFrame
             panel.setFrameOrigin(NSPoint(x: v.maxX - size.width - 20, y: v.minY + 20))
         }
+        model.ensureWindowVisible()
         panel.orderFrontRegardless()
 
         NotificationCenter.default.addObserver(
             self, selector: #selector(windowMoved),
             name: NSWindow.didMoveNotification, object: panel)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(screenParametersChanged),
+            name: NSApplication.didChangeScreenParametersNotification, object: nil)
 
         model.presentSettings = { [weak self] in self?.openSettings() }
         model.onCharacterChanged = { [weak self] c in
@@ -254,6 +258,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func windowMoved() { model.persistPosition() }
+
+    @objc private func screenParametersChanged() { model.ensureWindowVisible() }
 
     @objc private func openSettings() {
         if settingsWindow == nil {
